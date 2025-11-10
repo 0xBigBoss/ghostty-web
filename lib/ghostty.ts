@@ -282,7 +282,8 @@ export class KeyEncoder {
 
     this.exports.ghostty_wasm_free_u8(valuePtr);
 
-    if (result !== 0) {
+    // Check result if it's defined (some WASM functions may return void)
+    if (result !== undefined && result !== 0) {
       throw new Error(`Failed to set encoder option: ${result}`);
     }
   }

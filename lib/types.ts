@@ -124,24 +124,72 @@ export enum KeyAction {
 }
 
 /**
- * Physical key codes (subset, based on USB HID)
+ * Physical key codes (based on USB HID Usage Tables - Keyboard/Keypad Page 0x07)
+ * Reference: https://www.usb.org/sites/default/files/hut1_21.pdf
  */
 export enum Key {
+  // Letters (0x04-0x1D)
   A = 4,
   B = 5,
   C = 6,
-  // ... Add more as needed
+  D = 7,
+  E = 8,
+  F = 9,
+  G = 10,
+  H = 11,
+  I = 12,
+  J = 13,
+  K = 14,
+  L = 15,
+  M = 16,
+  N = 17,
+  O = 18,
+  P = 19,
+  Q = 20,
+  R = 21,
+  S = 22,
+  T = 23,
+  U = 24,
+  V = 25,
+  W = 26,
+  X = 27,
+  Y = 28,
+  Z = 29,
+
+  // Numbers (0x1E-0x27)
+  ONE = 30,
+  TWO = 31,
+  THREE = 32,
+  FOUR = 33,
+  FIVE = 34,
+  SIX = 35,
+  SEVEN = 36,
+  EIGHT = 37,
+  NINE = 38,
+  ZERO = 39,
+
+  // Special keys (0x28-0x2C)
   ENTER = 40,
   ESCAPE = 41,
   BACKSPACE = 42,
   TAB = 43,
   SPACE = 44,
-  // Arrow keys
-  RIGHT = 79,
-  LEFT = 80,
-  DOWN = 81,
-  UP = 82,
-  // Function keys
+
+  // Punctuation (0x2D-0x38)
+  MINUS = 45,              // - and _
+  EQUAL = 46,              // = and +
+  BRACKET_LEFT = 47,       // [ and {
+  BRACKET_RIGHT = 48,      // ] and }
+  BACKSLASH = 49,          // \ and |
+  SEMICOLON = 51,          // ; and :
+  QUOTE = 52,              // ' and "
+  GRAVE = 53,              // ` and ~
+  COMMA = 54,              // , and <
+  PERIOD = 55,             // . and >
+  SLASH = 56,              // / and ?
+
+  // Function keys (0x3A-0x45)
+  CAPS_LOCK = 57,
   F1 = 58,
   F2 = 59,
   F3 = 60,
@@ -154,6 +202,60 @@ export enum Key {
   F10 = 67,
   F11 = 68,
   F12 = 69,
+
+  // Special keys (0x46-0x4E)
+  PRINT_SCREEN = 70,
+  SCROLL_LOCK = 71,
+  PAUSE = 72,
+  INSERT = 73,
+  HOME = 74,
+  PAGE_UP = 75,
+  DELETE = 76,
+  END = 77,
+  PAGE_DOWN = 78,
+
+  // Arrow keys (0x4F-0x52)
+  RIGHT = 79,
+  LEFT = 80,
+  DOWN = 81,
+  UP = 82,
+
+  // Keypad (0x53-0x63)
+  NUM_LOCK = 83,
+  KP_DIVIDE = 84,          // Keypad /
+  KP_MULTIPLY = 85,        // Keypad *
+  KP_MINUS = 86,           // Keypad -
+  KP_PLUS = 87,            // Keypad +
+  KP_ENTER = 88,           // Keypad Enter
+  KP_1 = 89,
+  KP_2 = 90,
+  KP_3 = 91,
+  KP_4 = 92,
+  KP_5 = 93,
+  KP_6 = 94,
+  KP_7 = 95,
+  KP_8 = 96,
+  KP_9 = 97,
+  KP_0 = 98,
+  KP_PERIOD = 99,          // Keypad .
+
+  // International keys (0x64-0x65)
+  NON_US_BACKSLASH = 100,  // \ and | on non-US keyboards
+  APPLICATION = 101,        // Context menu key
+  
+  // Additional function keys (0x68-0x73) - optional but included for completeness
+  F13 = 104,
+  F14 = 105,
+  F15 = 106,
+  F16 = 107,
+  F17 = 108,
+  F18 = 109,
+  F19 = 110,
+  F20 = 111,
+  F21 = 112,
+  F22 = 113,
+  F23 = 114,
+  F24 = 115,
 }
 
 /**

@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Input Handler Demo - Ghostty WASM Terminal</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+      color: #333;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      margin-bottom: 30px;
+    }
+
+    h1 {
+      font-size: 2.5em;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .subtitle {
+      color: #666;
+      font-size: 1.1em;
+    }
+
+    .demo-section {
+      background: white;
+      padding: 25px;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      margin-bottom: 20px;
+    }
+
+    h2 {
+      color: #667eea;
+      margin-bottom: 15px;
+      font-size: 1.5em;
+    }
+
+    .input-area {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border: 3px solid #667eea;
+      border-radius: 8px;
+      padding: 20px;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 16px;
+      min-height: 150px;
+      cursor: text;
+      position: relative;
+      margin-bottom: 20px;
+    }
+
+    .input-area:focus {
+      outline: none;
+      border-color: #764ba2;
+      box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.1);
+    }
+
+    .input-area::after {
+      content: 'Click here and start typing...';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #666;
+      font-size: 18px;
+      pointer-events: none;
+      opacity: 0.5;
+    }
+
+    .input-area.has-content::after {
+      display: none;
+    }
+
+    #output {
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.6;
+    }
+
+    .output-section {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+      margin-top: 15px;
+    }
+
+    .output-box {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 8px;
+      border: 2px solid #e0e0e0;
+    }
+
+    .output-box h3 {
+      font-size: 0.9em;
+      color: #667eea;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .output-box pre {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 13px;
+      font-family: 'Courier New', monospace;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-top: 15px;
+    }
+
+    .stat-box {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 2.5em;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .stat-label {
+      font-size: 0.9em;
+      opacity: 0.9;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    .status {
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      font-weight: 600;
+    }
+
+    .status.error {
+      background: #fee;
+      color: #c33;
+      border: 2px solid #fcc;
+    }
+
+    .status.success {
+      background: #efe;
+      color: #3c3;
+      border: 2px solid #cfc;
+    }
+
+    .key-hint {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+      margin-top: 15px;
+    }
+
+    .key-hint h4 {
+      color: #667eea;
+      margin-bottom: 10px;
+    }
+
+    .key-hint ul {
+      list-style-position: inside;
+      color: #666;
+      line-height: 1.8;
+    }
+
+    .key-hint code {
+      background: #e0e0e0;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>⌨️ Input Handler Demo</h1>
+      <p class="subtitle">Test keyboard input encoding with Ghostty's KeyEncoder</p>
+    </header>
+
+    <div class="demo-section">
+      <div id="status" class="status" style="display: none;"></div>
+
+      <h2>Interactive Terminal Input</h2>
+      <p style="margin-bottom: 15px; color: #666;">
+        Click the box below and type to see how keys are encoded:
+      </p>
+
+      <div class="controls">
+        <button onclick="clearOutput()">Clear Output</button>
+        <button onclick="showStats()">Refresh Stats</button>
+      </div>
+
+      <div id="inputArea" class="input-area" tabindex="0">
+        <div id="output"></div>
+      </div>
+
+      <div class="output-section">
+        <div class="output-box">
+          <h3>Last Key Sequence</h3>
+          <pre id="lastKey"></pre>
+        </div>
+        <div class="output-box">
+          <h3>Hex Dump</h3>
+          <pre id="hexDump"></pre>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat-box">
+          <div class="stat-value" id="keyCount">0</div>
+          <div class="stat-label">Keys Pressed</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="byteCount">0</div>
+          <div class="stat-label">Bytes Generated</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="ctrlCount">0</div>
+          <div class="stat-label">Ctrl Combinations</div>
+        </div>
+      </div>
+
+      <div class="key-hint">
+        <h4>Try These Keys:</h4>
+        <ul>
+          <li><code>a-z, A-Z, 0-9</code> - Printable characters</li>
+          <li><code>Ctrl+A, Ctrl+C, Ctrl+Z</code> - Control combinations</li>
+          <li><code>Enter, Tab, Escape, Backspace</code> - Special keys</li>
+          <li><code>Arrow keys (↑↓←→)</code> - Navigation</li>
+          <li><code>Home, End, Page Up, Page Down</code> - Navigation keys</li>
+          <li><code>F1-F12</code> - Function keys</li>
+          <li><code>Alt+key, Shift+key</code> - Modifier combinations</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { Ghostty } from '../lib/ghostty.js';
+    import { InputHandler } from '../lib/input-handler.js';
+
+    let handler = null;
+    let keyCount = 0;
+    let byteCount = 0;
+    let ctrlCount = 0;
+    const allData = [];
+
+    async function init() {
+      try {
+        // Show loading status
+        showStatus('Loading Ghostty WASM...', false);
+
+        // Load Ghostty WASM
+        const ghostty = await Ghostty.load('../ghostty-vt.wasm');
+        
+        // Get input area
+        const inputArea = document.getElementById('inputArea');
+        
+        // Create InputHandler
+        handler = new InputHandler(
+          ghostty,
+          inputArea,
+          handleData,
+          handleBell
+        );
+
+        // Focus the input area
+        inputArea.focus();
+
+        showStatus('✅ Ready! Click the box and start typing...', true);
+        
+        console.log('✅ InputHandler initialized successfully!');
+      } catch (error) {
+        console.error('Failed to initialize:', error);
+        showStatus(`❌ Error: ${error.message}`, false);
+      }
+    }
+
+    function handleData(data) {
+      // Track stats
+      keyCount++;
+      byteCount += data.length;
+      
+      // Check if it's a control character (Ctrl+something)
+      if (data.length > 0 && data.charCodeAt(0) < 32) {
+        ctrlCount++;
+      }
+
+      // Store data
+      allData.push(data);
+
+      // Display in terminal
+      const output = document.getElementById('output');
+      const inputArea = document.getElementById('inputArea');
+      
+      // Show printable characters or escape sequences
+      let displayText = '';
+      for (let i = 0; i < data.length; i++) {
+        const code = data.charCodeAt(i);
+        if (code >= 32 && code < 127) {
+          // Printable ASCII
+          displayText += data[i];
+        } else if (code === 13) {
+          // Carriage return
+          displayText += '\n';
+        } else if (code === 9) {
+          // Tab
+          displayText += '    ';
+        } else {
+          // Show as hex
+          displayText += `[0x${code.toString(16).padStart(2, '0')}]`;
+        }
+      }
+      
+      output.textContent += displayText;
+      inputArea.classList.add('has-content');
+
+      // Update displays
+      updateLastKey(data);
+      updateStats();
+    }
+
+    function handleBell() {
+      console.log('🔔 Bell!');
+      // Could play a sound here
+    }
+
+    function updateLastKey(data) {
+      const lastKeyEl = document.getElementById('lastKey');
+      const hexDumpEl = document.getElementById('hexDump');
+
+      // Show the sequence
+      let sequence = '';
+      for (let i = 0; i < data.length; i++) {
+        const code = data.charCodeAt(i);
+        if (code === 27) sequence += 'ESC';
+        else if (code === 13) sequence += 'CR';
+        else if (code === 10) sequence += 'LF';
+        else if (code === 9) sequence += 'TAB';
+        else if (code < 32) sequence += `^${String.fromCharCode(64 + code)}`;
+        else if (code === 127) sequence += 'DEL';
+        else sequence += data[i];
+      }
+      lastKeyEl.textContent = sequence || '(none)';
+
+      // Show hex dump
+      const hexValues = [];
+      for (let i = 0; i < data.length; i++) {
+        hexValues.push('0x' + data.charCodeAt(i).toString(16).padStart(2, '0'));
+      }
+      hexDumpEl.textContent = hexValues.join(' ') || '(no data)';
+    }
+
+    function updateStats() {
+      document.getElementById('keyCount').textContent = keyCount;
+      document.getElementById('byteCount').textContent = byteCount;
+      document.getElementById('ctrlCount').textContent = ctrlCount;
+    }
+
+    function showStatus(message, isSuccess) {
+      const status = document.getElementById('status');
+      status.textContent = message;
+      status.className = 'status ' + (isSuccess ? 'success' : 'error');
+      status.style.display = 'block';
+    }
+
+    // Global functions for buttons
+    window.clearOutput = function() {
+      document.getElementById('output').textContent = '';
+      document.getElementById('inputArea').classList.remove('has-content');
+      allData.length = 0;
+      keyCount = 0;
+      byteCount = 0;
+      ctrlCount = 0;
+      updateStats();
+      updateLastKey('');
+    };
+
+    window.showStats = function() {
+      updateStats();
+    };
+
+    // Initialize on load
+    init();
+  </script>
+</body>
+</html>
