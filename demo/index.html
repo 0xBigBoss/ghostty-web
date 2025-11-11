@@ -237,6 +237,7 @@
       updateStatus('connecting', 'Connecting to server...');
       
       // Include terminal size in WebSocket URL
+      console.log(`Terminal dimensions at connect time: ${term.cols}x${term.rows}`);
       const wsUrlWithSize = `${WS_URL}?cols=${term.cols}&rows=${term.rows}`;
       console.log('Connecting to WebSocket:', wsUrlWithSize);
       
