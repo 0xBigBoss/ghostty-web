@@ -235,12 +235,15 @@
 
     function connect() {
       updateStatus('connecting', 'Connecting to server...');
-      console.log('Connecting to WebSocket:', WS_URL);
+      
+      // Include terminal size in WebSocket URL
+      const wsUrlWithSize = `${WS_URL}?cols=${term.cols}&rows=${term.rows}`;
+      console.log('Connecting to WebSocket:', wsUrlWithSize);
       
       // Show WebSocket URL in status bar
       document.getElementById('ws-url').textContent = WS_URL;
 
-      ws = new WebSocket(WS_URL);
+      ws = new WebSocket(wsUrlWithSize);
 
       ws.onopen = () => {
         updateStatus('connected', 'Connected (PTY mode)');

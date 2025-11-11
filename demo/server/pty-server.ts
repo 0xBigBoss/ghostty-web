@@ -98,10 +98,17 @@ const server = Bun.serve({
   },
 
   websocket: {
-    open(ws) {
+    open(ws, req) {
+      // Get terminal size from query parameters
+      const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+      const cols = parseInt(url.searchParams.get('cols') || '80');
+      const rows = parseInt(url.searchParams.get('rows') || '24');
+      
+      console.log(`Client requested terminal size: ${cols}x${rows}`);
+      
       // Create new shell session for this client
       const sessionId = Math.random().toString(36).substring(7);
-      const shell = createShell(homedir());
+      const shell = createShell(homedir(), cols, rows);
 
       const session: Session = {
         id: sessionId,
