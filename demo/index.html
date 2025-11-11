@@ -247,6 +247,11 @@
         console.log('WebSocket connected - PTY mode active');
         console.log('Terminal onData handler:', term.onData ? 'registered' : 'NOT REGISTERED');
         
+        // Send current terminal size to server
+        const { cols, rows } = term;
+        ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        console.log(`Sent initial size to server: ${cols}x${rows}`);
+        
         // Focus the terminal
         term.focus();
       };
@@ -606,6 +611,14 @@
         // Handle window resize
         window.addEventListener('resize', () => {
           fitAddon.fit();
+        });
+
+        // Send resize notifications to server
+        term.onResize(({ cols, rows }) => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+            console.log(`Sent resize to server: ${cols}x${rows}`);
+          }
         });
 
         // Handle input

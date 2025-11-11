@@ -174,8 +174,24 @@ const server = Bun.serve({
       }
 
       try {
-        // Forward input to shell stdin
         const input = message.toString();
+        
+        // Check if it's a resize message (JSON format: {"type":"resize","cols":N,"rows":N})
+        if (input.startsWith('{')) {
+          try {
+            const msg = JSON.parse(input);
+            if (msg.type === 'resize') {
+              console.log(`[${session.id}] Resize request: ${msg.cols}x${msg.rows}`);
+              // Note: 'script' command doesn't support dynamic resize,
+              // but we log it for debugging. Use node-pty for full resize support.
+              return;
+            }
+          } catch (e) {
+            // Not JSON, treat as regular input
+          }
+        }
+        
+        // Forward input to shell stdin
         console.log(`[${session.id}] Received input:`, JSON.stringify(input));
         session.ptyProcess.stdin.write(input);
       } catch (error: any) {
