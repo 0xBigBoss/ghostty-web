@@ -15,6 +15,7 @@
 import { Ghostty, GhosttyTerminal } from './ghostty';
 import { CanvasRenderer } from './renderer';
 import { InputHandler } from './input-handler';
+import { SelectionManager } from './selection-manager';
 import { EventEmitter } from './event-emitter';
 import type { 
   ITerminalOptions, 
@@ -43,17 +44,20 @@ export class Terminal implements ITerminalCore {
   private wasmTerm?: GhosttyTerminal;
   private renderer?: CanvasRenderer;
   private inputHandler?: InputHandler;
+  private selectionManager?: SelectionManager;
   private canvas?: HTMLCanvasElement;
 
   // Event emitters
   private dataEmitter = new EventEmitter<string>();
   private resizeEmitter = new EventEmitter<{ cols: number; rows: number }>();
   private bellEmitter = new EventEmitter<void>();
+  private selectionChangeEmitter = new EventEmitter<void>();
 
   // Public event accessors (xterm.js compatibility)
   public readonly onData: IEvent<string> = this.dataEmitter.event;
   public readonly onResize: IEvent<{ cols: number; rows: number }> = this.resizeEmitter.event;
   public readonly onBell: IEvent<void> = this.bellEmitter.event;
+  public readonly onSelectionChange: IEvent<void> = this.selectionChangeEmitter.event;
 
   // Lifecycle state
   private isOpen = false;
@@ -142,6 +146,21 @@ export class Terminal implements ITerminalCore {
         }
       );
 
+      // Create selection manager
+      this.selectionManager = new SelectionManager(
+        this,
+        this.renderer,
+        this.wasmTerm
+      );
+      
+      // Connect selection manager to renderer
+      this.renderer.setSelectionManager(this.selectionManager);
+      
+      // Forward selection change events
+      this.selectionManager.onSelectionChange(() => {
+        this.selectionChangeEmitter.fire();
+      });
+
       // Mark as open
       this.isOpen = true;
 
@@ -166,6 +185,11 @@ export class Terminal implements ITerminalCore {
    */
   write(data: string | Uint8Array): void {
     this.assertOpen();
+
+    // Clear selection when writing new data (standard terminal behavior)
+    if (this.selectionManager?.hasSelection()) {
+      this.selectionManager.clearSelection();
+    }
 
     // Write directly to WASM terminal (handles VT parsing internally)
     this.wasmTerm!.write(data);
@@ -261,6 +285,42 @@ export class Terminal implements ITerminalCore {
     this.addons.push(addon);
   }
 
+  // ==========================================================================
+  // Selection API (xterm.js compatible)
+  // ==========================================================================
+
+  /**
+   * Get the selected text as a string
+   */
+  public getSelection(): string {
+    return this.selectionManager?.getSelection() || '';
+  }
+
+  /**
+   * Check if there's an active selection
+   */
+  public hasSelection(): boolean {
+    return this.selectionManager?.hasSelection() || false;
+  }
+
+  /**
+   * Clear the current selection
+   */
+  public clearSelection(): void {
+    this.selectionManager?.clearSelection();
+  }
+
+  /**
+   * Select all text in the terminal
+   */
+  public selectAll(): void {
+    this.selectionManager?.selectAll();
+  }
+
+  // ==========================================================================
+  // Lifecycle
+  // ==========================================================================
+
   /**
    * Dispose terminal and clean up resources
    */
@@ -291,6 +351,7 @@ export class Terminal implements ITerminalCore {
     this.dataEmitter.dispose();
     this.resizeEmitter.dispose();
     this.bellEmitter.dispose();
+    this.selectionChangeEmitter.dispose();
   }
 
   // ==========================================================================
@@ -315,6 +376,12 @@ export class Terminal implements ITerminalCore {
    * Clean up components (called on dispose or error)
    */
   private cleanupComponents(): void {
+    // Dispose selection manager
+    if (this.selectionManager) {
+      this.selectionManager.dispose();
+      this.selectionManager = undefined;
+    }
+
     // Dispose input handler
     if (this.inputHandler) {
       this.inputHandler.dispose();

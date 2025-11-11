@@ -481,80 +481,14 @@
     // =========================================================================
     // Text Selection Support
     // =========================================================================
-
-    function enableTextSelection() {
-      const canvas = term.element?.querySelector('canvas');
-      if (!canvas) {
-        console.warn('Canvas not found for selection');
-        return;
-      }
-
-      let isSelecting = false;
-      let selectionStart = null;
-
-      canvas.addEventListener('mousedown', (e) => {
-        // Only left click
-        if (e.button === 0) {
-          isSelecting = true;
-          selectionStart = { x: e.offsetX, y: e.offsetY };
-          
-          // Clear any existing selection
-          if (window.getSelection) {
-            window.getSelection().removeAllRanges();
-          }
-        }
-      });
-
-      canvas.addEventListener('mousemove', (e) => {
-        if (isSelecting) {
-          // Visual feedback that we're selecting
-          canvas.style.cursor = 'text';
-        }
-      });
-
-      canvas.addEventListener('mouseup', (e) => {
-        if (isSelecting) {
-          isSelecting = false;
-          canvas.style.cursor = 'default';
-          
-          // Get selected text from terminal buffer
-          const text = getSelectedText(selectionStart, { x: e.offsetX, y: e.offsetY });
-          if (text) {
-            copyToClipboard(text);
-            console.log('Selected text:', text);
-          }
-        }
-      });
-
-      // Also handle double-click to select word
-      canvas.addEventListener('dblclick', (e) => {
-        const text = getWordAtPosition(e.offsetX, e.offsetY);
-        if (text) {
-          copyToClipboard(text);
-          console.log('Selected word:', text);
-        }
-      });
-    }
-
-    function getSelectedText(start, end) {
-      // This is a simplified version - proper implementation would
-      // calculate character positions from pixel coordinates
-      // For now, we'll indicate selection is happening
-      return null; // Would need proper coordinate-to-cell conversion
-    }
-
-    function getWordAtPosition(x, y) {
-      // Simplified - would need proper implementation
-      return null;
-    }
-
-    function copyToClipboard(text) {
-      if (navigator.clipboard && text) {
-        navigator.clipboard.writeText(text)
-          .then(() => console.log('Copied to clipboard'))
-          .catch(err => console.error('Failed to copy:', err));
-      }
-    }
+    
+    // Text selection is now built-in to the Terminal library!
+    // Use term.getSelection() to access selected text programmatically.
+    // Features:
+    // - Click and drag to select text
+    // - Double-click to select a word
+    // - Auto-copy to clipboard on selection
+    // - Ctrl+C / Cmd+C to copy (via browser context menu)
 
     // =========================================================================
     // Initialization
@@ -624,8 +558,8 @@
         // Handle input
         term.onData(handleInput);
 
-        // Enable text selection with mouse
-        enableTextSelection();
+        // Text selection is now built-in - no need to enable it!
+        // You can use term.getSelection(), term.selectAll(), etc.
 
         // Connect to WebSocket server
         connect();

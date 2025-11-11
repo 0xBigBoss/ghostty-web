@@ -529,6 +529,13 @@ bun test -t "test name pattern"
 
 **Best practices for agents:**
 
+0. **ALWAYS pull from main before starting work:**
+   ```bash
+   git fetch origin
+   git merge origin/main --no-edit
+   ```
+   This ensures you're working with the latest code and all features are available.
+
 1. **Always run tests after changes:**
    ```bash
    bun test lib/buffer.test.ts
@@ -553,3 +560,9 @@ bun test -t "test name pattern"
 5. **Iterate quickly:**
    - Vite has hot reload - save file, browser auto-updates
    - Keep console open to catch errors immediately
+
+6. **DO NOT commit summary markdown files:**
+   - Never commit `BUGFIX-*.md`, `SUMMARY-*.md`, or similar documentation files
+   - These are for immediate context only, not permanent documentation
+   - Add them to `.gitignore` if creating them frequently
+   - Commit messages should be comprehensive instead

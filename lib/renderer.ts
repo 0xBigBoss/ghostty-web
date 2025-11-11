@@ -13,6 +13,7 @@
 import type { GhosttyCell } from './types';
 import { CellFlags } from './types';
 import type { ITheme } from './interfaces';
+import type { SelectionManager } from './selection-manager';
 
 // Interface for objects that can be rendered
 export interface IRenderable {
@@ -91,6 +92,9 @@ export class CanvasRenderer {
   private cursorVisible: boolean = true;
   private cursorBlinkInterval?: number;
   private lastCursorPosition: { x: number; y: number } = { x: 0, y: 0 };
+  
+  // Selection manager (for rendering selection overlay)
+  private selectionManager?: SelectionManager;
   
   constructor(canvas: HTMLCanvasElement, options: RendererOptions = {}) {
     this.canvas = canvas;
@@ -253,17 +257,59 @@ export class CanvasRenderer {
       }
     }
     
+    // Check if we need to redraw selection-related lines
+    // Only force redraws when actively selecting or clearing selection
+    const hasSelection = this.selectionManager && this.selectionManager.hasSelection();
+    const isActivelySelecting = this.selectionManager && this.selectionManager.isActivelySelecting();
+    const selectionRows = new Set<number>();
+    
+    // Mark selection rows for redraw ONLY when actively selecting (mouse is down)
+    // This prevents slowdown when just typing with a static selection
+    if (hasSelection && isActivelySelecting) {
+      const coords = this.selectionManager!.getSelectionCoords();
+      if (coords) {
+        for (let row = coords.startRow; row <= coords.endRow; row++) {
+          selectionRows.add(row);
+        }
+      }
+    }
+    
+    // Always mark previous selection rows for redraw (to clear old overlay)
+    if (this.selectionManager) {
+      const prevCoords = this.selectionManager.getPreviousSelectionCoords();
+      if (prevCoords) {
+        for (let row = prevCoords.startRow; row <= prevCoords.endRow; row++) {
+          selectionRows.add(row);
+        }
+        // Clear the previous selection tracking after marking for redraw
+        this.selectionManager.clearPreviousSelection();
+      }
+    }
+    
+    // Track if anything was actually rendered
+    let anyLinesRendered = false;
+    
     // Render each line
     for (let y = 0; y < dims.rows; y++) {
-      // Only render dirty lines for performance (unless forcing all)
-      if (!forceAll && !buffer.isRowDirty(y)) {
+      // Render if forcing all, or if dirty, or if it has selection
+      const needsRender = forceAll || buffer.isRowDirty(y) || selectionRows.has(y);
+      
+      if (!needsRender) {
         continue;
       }
       
+      anyLinesRendered = true;
       const line = buffer.getLine(y);
       if (line) {
         this.renderLine(line, y, dims.cols);
       }
+    }
+    
+    // Render selection highlight AFTER all text (so it overlays)
+    // Only render if we actually rendered some lines
+    if (hasSelection && anyLinesRendered) {
+      // Draw selection overlay - only when we've redrawn the underlying text
+      this.renderSelection(dims.cols);
     }
     
     // Render cursor
@@ -505,11 +551,54 @@ export class CanvasRenderer {
   }
   
   /**
+   * Get canvas element (needed by SelectionManager)
+   */
+  public getCanvas(): HTMLCanvasElement {
+    return this.canvas;
+  }
+  
+  /**
+   * Set selection manager (for rendering selection overlay)
+   */
+  public setSelectionManager(manager: SelectionManager): void {
+    this.selectionManager = manager;
+  }
+  
+  /**
    * Clear entire canvas
    */
   public clear(): void {
     this.ctx.fillStyle = this.theme.background;
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+  }
+  
+  /**
+   * Render selection overlay
+   */
+  private renderSelection(cols: number): void {
+    const coords = this.selectionManager!.getSelectionCoords();
+    if (!coords) return;
+    
+    const { startCol, startRow, endCol, endRow } = coords;
+    
+    // Use semi-transparent fill for selection
+    this.ctx.save();
+    this.ctx.fillStyle = this.theme.selectionBackground;
+    this.ctx.globalAlpha = 0.5; // Make it semi-transparent so text is visible
+    
+    for (let row = startRow; row <= endRow; row++) {
+      const colStart = (row === startRow) ? startCol : 0;
+      const colEnd = (row === endRow) ? endCol : cols - 1;
+      
+      const x = colStart * this.metrics.width;
+      const y = row * this.metrics.height;
+      const width = (colEnd - colStart + 1) * this.metrics.width;
+      const height = this.metrics.height;
+      
+      this.ctx.fillRect(x, y, width, height);
+    }
+    
+    this.ctx.restore();
   }
   
   /**
