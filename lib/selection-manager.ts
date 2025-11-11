@@ -188,6 +188,12 @@ export class SelectionManager {
     // Mouse down - start selection or clear existing
     canvas.addEventListener('mousedown', (e: MouseEvent) => {
       if (e.button === 0) { // Left click only
+        // CRITICAL: Focus the terminal so it can receive keyboard input
+        // The canvas doesn't have tabindex, but the parent container does
+        if (canvas.parentElement) {
+          canvas.parentElement.focus();
+        }
+        
         const cell = this.pixelToCell(e.offsetX, e.offsetY);
         
         // Always clear previous selection on new click
