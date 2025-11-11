@@ -104,7 +104,7 @@ const server = Bun.serve({
 
   websocket: {
     open(ws, req) {
-      // Get terminal size from query parameters
+      // Get terminal size from query parameters  
       const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
       const cols = parseInt(url.searchParams.get('cols') || '80');
       const rows = parseInt(url.searchParams.get('rows') || '24');
