@@ -1,8 +1,8 @@
 /**
  * Canvas Renderer for Terminal Display
  * 
- * High-performance canvas-based renderer that draws the terminal buffer.
- * Features:
+ * High-performance canvas-based renderer that draws the terminal using
+ * Ghostty's WASM terminal emulator. Features:
  * - Font metrics measurement with DPI scaling
  * - Full color support (256-color palette + RGB)
  * - All text styles (bold, italic, underline, strikethrough, etc.)
@@ -10,15 +10,16 @@
  * - Dirty line optimization for 60 FPS
  */
 
-import type { Cell, CellColor } from './buffer-types';
+import type { GhosttyCell } from './types';
+import { CellFlags } from './types';
 import type { ITheme } from './interfaces';
 
 // Interface for objects that can be rendered
 export interface IRenderable {
-  getAllLines(): Cell[][];
+  getLine(y: number): GhosttyCell[] | null;
   getCursor(): { x: number; y: number; visible: boolean };
   getDimensions(): { cols: number; rows: number };
-  isDirty(y: number): boolean;
+  isRowDirty(y: number): boolean;
   clearDirty(): void;
 }
 
@@ -175,23 +176,8 @@ export class CanvasRenderer {
   // Color Conversion
   // ==========================================================================
   
-  private colorToCSS(color: CellColor, isBackground: boolean = false): string {
-    switch (color.type) {
-      case 'default':
-        return isBackground ? this.theme.background : this.theme.foreground;
-      
-      case 'palette':
-        // Handle palette colors (0-15 use our theme, 16-255 could be extended)
-        if (color.index >= 0 && color.index < this.palette.length) {
-          return this.palette[color.index];
-        }
-        // Extended 256-color palette (16-255) - simplified for now
-        // In full implementation, would compute xterm-256 colors
-        return isBackground ? this.theme.background : this.theme.foreground;
-      
-      case 'rgb':
-        return `rgb(${color.r}, ${color.g}, ${color.b})`;
-    }
+  private rgbToCSS(r: number, g: number, b: number): string {
+    return `rgb(${r}, ${g}, ${b})`;
   }
   
   // ==========================================================================
@@ -233,7 +219,6 @@ export class CanvasRenderer {
    * Render the terminal buffer to canvas
    */
   public render(buffer: IRenderable, forceAll: boolean = false): void {
-    const lines = buffer.getAllLines();
     const cursor = buffer.getCursor();
     const dims = buffer.getDimensions();
     
@@ -250,26 +235,35 @@ export class CanvasRenderer {
     const cursorMoved = cursor.x !== this.lastCursorPosition.x || cursor.y !== this.lastCursorPosition.y;
     if (cursorMoved || this.cursorBlink) {
       // Mark cursor lines as needing redraw
-      if (!forceAll && !buffer.isDirty(cursor.y)) {
+      if (!forceAll && !buffer.isRowDirty(cursor.y)) {
         // Need to redraw cursor line
-        this.renderLine(lines[cursor.y], cursor.y, dims.cols);
+        const line = buffer.getLine(cursor.y);
+        if (line) {
+          this.renderLine(line, cursor.y, dims.cols);
+        }
       }
       if (cursorMoved && this.lastCursorPosition.y !== cursor.y) {
         // Also redraw old cursor line if cursor moved to different line
-        if (!forceAll && !buffer.isDirty(this.lastCursorPosition.y)) {
-          this.renderLine(lines[this.lastCursorPosition.y], this.lastCursorPosition.y, dims.cols);
+        if (!forceAll && !buffer.isRowDirty(this.lastCursorPosition.y)) {
+          const line = buffer.getLine(this.lastCursorPosition.y);
+          if (line) {
+            this.renderLine(line, this.lastCursorPosition.y, dims.cols);
+          }
         }
       }
     }
     
     // Render each line
-    for (let y = 0; y < lines.length; y++) {
+    for (let y = 0; y < dims.rows; y++) {
       // Only render dirty lines for performance (unless forcing all)
-      if (!forceAll && !buffer.isDirty(y)) {
+      if (!forceAll && !buffer.isRowDirty(y)) {
         continue;
       }
       
-      this.renderLine(lines[y], y, dims.cols);
+      const line = buffer.getLine(y);
+      if (line) {
+        this.renderLine(line, y, dims.cols);
+      }
     }
     
     // Render cursor
@@ -289,7 +283,7 @@ export class CanvasRenderer {
   /**
    * Render a single line
    */
-  private renderLine(line: Cell[], y: number, cols: number): void {
+  private renderLine(line: GhosttyCell[], y: number, cols: number): void {
     const lineY = y * this.metrics.height;
     
     // Clear line background
@@ -312,54 +306,55 @@ export class CanvasRenderer {
   /**
    * Render a single cell
    */
-  private renderCell(cell: Cell, x: number, y: number): void {
+  private renderCell(cell: GhosttyCell, x: number, y: number): void {
     const cellX = x * this.metrics.width;
     const cellY = y * this.metrics.height;
     const cellWidth = this.metrics.width * cell.width; // Handle wide chars (width=2)
     
-    // Get colors (handle inverse)
-    let fg = cell.fg;
-    let bg = cell.bg;
-    if (cell.inverse) {
-      [fg, bg] = [bg, fg];
+    // Extract colors and handle inverse
+    let fg_r = cell.fg_r, fg_g = cell.fg_g, fg_b = cell.fg_b;
+    let bg_r = cell.bg_r, bg_g = cell.bg_g, bg_b = cell.bg_b;
+    
+    if (cell.flags & CellFlags.INVERSE) {
+      [fg_r, fg_g, fg_b, bg_r, bg_g, bg_b] = [bg_r, bg_g, bg_b, fg_r, fg_g, fg_b];
     }
     
     // Always draw background to clear previous character
-    // This fixes the issue where overwriting characters leaves remnants
-    this.ctx.fillStyle = this.colorToCSS(bg, true);
+    this.ctx.fillStyle = this.rgbToCSS(bg_r, bg_g, bg_b);
     this.ctx.fillRect(cellX, cellY, cellWidth, this.metrics.height);
     
     // Skip rendering if invisible
-    if (cell.invisible) {
+    if (cell.flags & CellFlags.INVISIBLE) {
       return;
     }
     
     // Set text style
     let fontStyle = '';
-    if (cell.italic) fontStyle += 'italic ';
-    if (cell.bold) fontStyle += 'bold ';
+    if (cell.flags & CellFlags.ITALIC) fontStyle += 'italic ';
+    if (cell.flags & CellFlags.BOLD) fontStyle += 'bold ';
     this.ctx.font = `${fontStyle}${this.fontSize}px ${this.fontFamily}`;
     
     // Set text color
-    this.ctx.fillStyle = this.colorToCSS(fg, false);
+    this.ctx.fillStyle = this.rgbToCSS(fg_r, fg_g, fg_b);
     
     // Apply faint effect
-    if (cell.faint) {
+    if (cell.flags & CellFlags.FAINT) {
       this.ctx.globalAlpha = 0.5;
     }
     
     // Draw text
     const textX = cellX;
     const textY = cellY + this.metrics.baseline;
-    this.ctx.fillText(cell.char, textX, textY);
+    const char = String.fromCodePoint(cell.codepoint || 32); // Default to space if null
+    this.ctx.fillText(char, textX, textY);
     
     // Reset alpha
-    if (cell.faint) {
+    if (cell.flags & CellFlags.FAINT) {
       this.ctx.globalAlpha = 1.0;
     }
     
     // Draw underline
-    if (cell.underline) {
+    if (cell.flags & CellFlags.UNDERLINE) {
       const underlineY = cellY + this.metrics.baseline + 2;
       this.ctx.strokeStyle = this.ctx.fillStyle;
       this.ctx.lineWidth = 1;
@@ -370,7 +365,7 @@ export class CanvasRenderer {
     }
     
     // Draw strikethrough
-    if (cell.strikethrough) {
+    if (cell.flags & CellFlags.STRIKETHROUGH) {
       const strikeY = cellY + this.metrics.height / 2;
       this.ctx.strokeStyle = this.ctx.fillStyle;
       this.ctx.lineWidth = 1;

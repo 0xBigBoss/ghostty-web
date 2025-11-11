@@ -32,9 +32,6 @@ export type {
   TerminalHandle
 } from './types';
 
-// Legacy buffer types (for renderer compatibility)
-export type { Cell, CellColor } from './buffer-types';
-
 // Low-level components (for custom integrations)
 export { CanvasRenderer } from './renderer';
 export type { RendererOptions, FontMetrics, IRenderable } from './renderer';

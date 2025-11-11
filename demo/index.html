@@ -235,12 +235,16 @@
 
     function connect() {
       updateStatus('connecting', 'Connecting to server...');
-      console.log('Connecting to WebSocket:', WS_URL);
+      
+      // Include terminal size in WebSocket URL
+      console.log(`Terminal dimensions at connect time: ${term.cols}x${term.rows}`);
+      const wsUrlWithSize = `${WS_URL}?cols=${term.cols}&rows=${term.rows}`;
+      console.log('Connecting to WebSocket:', wsUrlWithSize);
       
       // Show WebSocket URL in status bar
       document.getElementById('ws-url').textContent = WS_URL;
 
-      ws = new WebSocket(WS_URL);
+      ws = new WebSocket(wsUrlWithSize);
 
       ws.onopen = () => {
         updateStatus('connected', 'Connected (PTY mode)');
@@ -602,10 +606,19 @@
 
         // Fit terminal to container
         fitAddon.fit();
+        console.log(`After fit(): Terminal size is ${term.cols}x${term.rows}`);
 
         // Handle window resize
         window.addEventListener('resize', () => {
           fitAddon.fit();
+        });
+
+        // Send resize notifications to server
+        term.onResize(({ cols, rows }) => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+            console.log(`Sent resize to server: ${cols}x${rows}`);
+          }
         });
 
         // Handle input

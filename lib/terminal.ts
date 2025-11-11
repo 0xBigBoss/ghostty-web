@@ -1,8 +1,7 @@
 /**
  * Terminal - Main terminal emulator class
  * 
- * Integrates all components (ScreenBuffer, VTParser, CanvasRenderer, InputHandler)
- * into a single xterm.js-compatible API.
+ * Provides an xterm.js-compatible API wrapping Ghostty's WASM terminal emulator.
  * 
  * Usage:
  * ```typescript
@@ -13,9 +12,7 @@
  * ```
  */
 
-import { Ghostty, GhosttyTerminal, CellFlags } from './ghostty';
-import type { GhosttyCell } from './types';
-import type { Cell } from './buffer-types';
+import { Ghostty, GhosttyTerminal } from './ghostty';
 import { CanvasRenderer } from './renderer';
 import { InputHandler } from './input-handler';
 import { EventEmitter } from './event-emitter';
@@ -26,74 +23,6 @@ import type {
   IEvent,
   IDisposable 
 } from './interfaces';
-
-// ============================================================================
-// Terminal Class
-// ============================================================================
-
-
-/**
- * TerminalAdapter - Adapter to make GhosttyTerminal compatible with CanvasRenderer
- * 
- * Converts WASM's GhosttyCell format to the Cell format expected by the renderer.
- */
-class TerminalAdapter {
-  private wasmTerm: GhosttyTerminal;
-  
-  constructor(wasmTerm: GhosttyTerminal) {
-    this.wasmTerm = wasmTerm;
-  }
-
-  getAllLines(): Cell[][] {
-    const lines: Cell[][] = [];
-    for (let y = 0; y < this.wasmTerm.rows; y++) {
-      const wasmLine = this.wasmTerm.getLine(y);
-      if (wasmLine) {
-        lines.push(wasmLine.map(wc => this.convertCell(wc)));
-      } else {
-        // Shouldn't happen, but provide empty line as fallback
-        lines.push([]);
-      }
-    }
-    return lines;
-  }
-
-  getCursor(): { x: number; y: number; visible: boolean } {
-    return this.wasmTerm.getCursor();
-  }
-
-  getDimensions(): { cols: number; rows: number } {
-    return { cols: this.wasmTerm.cols, rows: this.wasmTerm.rows };
-  }
-
-  isDirty(y: number): boolean {
-    return this.wasmTerm.isRowDirty(y);
-  }
-
-  clearDirty(): void {
-    this.wasmTerm.clearDirty();
-  }
-
-  /**
-   * Convert WASM GhosttyCell to renderer Cell format
-   */
-  private convertCell(wc: GhosttyCell): Cell {
-    return {
-      char: String.fromCodePoint(wc.codepoint || 32), // Default to space if null codepoint
-      width: wc.width,
-      fg: { type: 'rgb', r: wc.fg_r, g: wc.fg_g, b: wc.fg_b },
-      bg: { type: 'rgb', r: wc.bg_r, g: wc.bg_g, b: wc.bg_b },
-      bold: (wc.flags & CellFlags.BOLD) !== 0,
-      italic: (wc.flags & CellFlags.ITALIC) !== 0,
-      underline: (wc.flags & CellFlags.UNDERLINE) !== 0,
-      inverse: (wc.flags & CellFlags.INVERSE) !== 0,
-      invisible: (wc.flags & CellFlags.INVISIBLE) !== 0,
-      strikethrough: (wc.flags & CellFlags.STRIKETHROUGH) !== 0,
-      faint: (wc.flags & CellFlags.FAINT) !== 0,
-      blink: (wc.flags & CellFlags.BLINK) !== 0,
-    };
-  }
-}
 
 // ============================================================================
 // Terminal Class
@@ -112,7 +41,6 @@ export class Terminal implements ITerminalCore {
   // Components (created on open())
   private ghostty?: Ghostty;
   private wasmTerm?: GhosttyTerminal;
-  private adapter?: TerminalAdapter;
   private renderer?: CanvasRenderer;
   private inputHandler?: InputHandler;
   private canvas?: HTMLCanvasElement;
@@ -177,14 +105,11 @@ export class Terminal implements ITerminalCore {
       // Load Ghostty WASM
       this.ghostty = await Ghostty.load(this.options.wasmPath);
 
-      // Create WASM terminal (replaces ScreenBuffer + VTParser!)
+      // Create WASM terminal
       this.wasmTerm = this.ghostty.createTerminal(
         this.options.cols,
         this.options.rows
       );
-
-      // Create adapter for renderer compatibility
-      this.adapter = new TerminalAdapter(this.wasmTerm);
 
       // Create canvas element
       this.canvas = document.createElement('canvas');
@@ -221,7 +146,7 @@ export class Terminal implements ITerminalCore {
       this.isOpen = true;
 
       // Render initial blank screen
-      this.renderer.render(this.adapter, true);
+      this.renderer.render(this.wasmTerm, true);
 
       // Start render loop
       this.startRenderLoop();
@@ -286,7 +211,7 @@ export class Terminal implements ITerminalCore {
     this.resizeEmitter.fire({ cols, rows });
 
     // Force full render
-    this.renderer!.render(this.adapter!, true);
+    this.renderer!.render(this.wasmTerm!, true);
   }
 
   /**
@@ -309,7 +234,7 @@ export class Terminal implements ITerminalCore {
       this.wasmTerm.free();
     }
     this.wasmTerm = this.ghostty!.createTerminal(this.cols, this.rows);
-    this.adapter = new TerminalAdapter(this.wasmTerm);
+
 
     // Clear renderer
     this.renderer!.clear();
@@ -379,7 +304,7 @@ export class Terminal implements ITerminalCore {
     const loop = () => {
       if (!this.isDisposed && this.isOpen) {
         // Render only dirty lines for 60 FPS performance
-        this.renderer!.render(this.adapter!, false);
+        this.renderer!.render(this.wasmTerm!, false);
         this.animationFrameId = requestAnimationFrame(loop);
       }
     };
@@ -415,7 +340,7 @@ export class Terminal implements ITerminalCore {
     }
 
     // Clear references
-    this.adapter = undefined;
+
     this.ghostty = undefined;
     this.element = undefined;
     this.textarea = undefined;

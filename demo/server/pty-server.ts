@@ -38,8 +38,10 @@ const sessions = new Map<any, Session>();
 /**
  * Create a PTY shell session
  */
-function createShell(cwd: string = process.cwd()) {
+function createShell(cwd: string = process.cwd(), cols: number = 80, rows: number = 24) {
   // Use 'script' command to create a real PTY
+  console.log(`Creating PTY shell with size ${cols}x${rows}`);
+  
   // script -q -c "bash" /dev/null creates a PTY running bash
   const shell = spawn('script', ['-qfc', SHELL, '/dev/null'], {
     cwd: cwd,
@@ -51,6 +53,9 @@ function createShell(cwd: string = process.cwd()) {
       PS1: '\\[\\033[1;32m\\]\\w\\[\\033[0m\\] $ ',
       // Disable some escape sequences that cause artifacts
       PROMPT_COMMAND: '',  // Disable dynamic prompt command
+      // Set terminal size via environment variables (vim and other apps read these)
+      COLUMNS: String(cols),
+      LINES: String(rows),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -79,7 +84,14 @@ const server = Bun.serve({
     const url = new URL(req.url);
     
     if (url.pathname === '/ws') {
-      const success = server.upgrade(req);
+      // Parse terminal size from query parameters before upgrade
+      const cols = parseInt(url.searchParams.get('cols') || '80');
+      const rows = parseInt(url.searchParams.get('rows') || '24');
+      
+      // Pass size data to WebSocket via upgrade data
+      const success = server.upgrade(req, {
+        data: { cols, rows }
+      });
       if (success) {
         return undefined;
       }
@@ -99,9 +111,14 @@ const server = Bun.serve({
 
   websocket: {
     open(ws) {
+      // Get terminal size from WebSocket data (set during upgrade)
+      const { cols, rows } = (ws.data as any) || { cols: 80, rows: 24 };
+      
+      console.log(`Client requested terminal size: ${cols}x${rows}`);
+      
       // Create new shell session for this client
       const sessionId = Math.random().toString(36).substring(7);
-      const shell = createShell(homedir());
+      const shell = createShell(homedir(), cols, rows);
 
       const session: Session = {
         id: sessionId,
@@ -153,17 +170,25 @@ const server = Bun.serve({
         sessions.delete(ws);
       });
 
-      // Send initial welcome message and test WebSocket
-      console.log(`[${session.id}] Sending welcome message to client`);
-      ws.send('TEST: WebSocket is working!\r\n');
-      ws.send('\x1b[1;36m╔══════════════════════════════════════════════════════════════╗\x1b[0m\r\n');
-      ws.send('\x1b[1;36m║\x1b[0m  \x1b[1;32mWelcome to Ghostty Terminal!\x1b[0m                             \x1b[1;36m║\x1b[0m\r\n');
-      ws.send('\x1b[1;36m║\x1b[0m                                                              \x1b[1;36m║\x1b[0m\r\n');
-      ws.send('\x1b[1;36m║\x1b[0m  You now have a real shell session with full PTY support.   \x1b[1;36m║\x1b[0m\r\n');
-      ws.send('\x1b[1;36m║\x1b[0m  Try: \x1b[1;33mls\x1b[0m, \x1b[1;33mcd\x1b[0m, \x1b[1;33mtop\x1b[0m, \x1b[1;33mvim\x1b[0m, or any command!              \x1b[1;36m║\x1b[0m\r\n');
-      ws.send('\x1b[1;36m╚══════════════════════════════════════════════════════════════╝\x1b[0m\r\n');
-      ws.send('\r\n');
-      console.log(`[${session.id}] Welcome message sent`);
+      // Send stty command to resize the PTY
+      // This runs inside the shell and sets the actual PTY size
+      // Clear the line after to hide the command echo
+      console.log(`[${session.id}] Setting PTY size via stty`);
+      shell.stdin.write(`stty cols ${cols} rows ${rows}; clear\n`);
+      
+      // Wait a bit for stty to execute, then send welcome
+      setTimeout(() => {
+        console.log(`[${session.id}] Sending welcome message to client`);
+        ws.send('TEST: WebSocket is working!\r\n');
+        ws.send('\x1b[1;36m╔══════════════════════════════════════════════════════════════╗\x1b[0m\r\n');
+        ws.send('\x1b[1;36m║\x1b[0m  \x1b[1;32mWelcome to Ghostty Terminal!\x1b[0m                             \x1b[1;36m║\x1b[0m\r\n');
+        ws.send('\x1b[1;36m║\x1b[0m                                                              \x1b[1;36m║\x1b[0m\r\n');
+        ws.send('\x1b[1;36m║\x1b[0m  You now have a real shell session with full PTY support.   \x1b[1;36m║\x1b[0m\r\n');
+        ws.send('\x1b[1;36m║\x1b[0m  Try: \x1b[1;33mls\x1b[0m, \x1b[1;33mcd\x1b[0m, \x1b[1;33mtop\x1b[0m, \x1b[1;33mvim\x1b[0m, or any command!              \x1b[1;36m║\x1b[0m\r\n');
+        ws.send('\x1b[1;36m╚══════════════════════════════════════════════════════════════╝\x1b[0m\r\n');
+        ws.send('\r\n');
+        console.log(`[${session.id}] Welcome message sent`);
+      }, 100);
     },
 
     message(ws, message) {
@@ -174,8 +199,24 @@ const server = Bun.serve({
       }
 
       try {
-        // Forward input to shell stdin
         const input = message.toString();
+        
+        // Check if it's a resize message (JSON format: {"type":"resize","cols":N,"rows":N})
+        if (input.startsWith('{')) {
+          try {
+            const msg = JSON.parse(input);
+            if (msg.type === 'resize') {
+              console.log(`[${session.id}] Resize request: ${msg.cols}x${msg.rows}`);
+              // Note: 'script' command doesn't support dynamic resize,
+              // but we log it for debugging. Use node-pty for full resize support.
+              return;
+            }
+          } catch (e) {
+            // Not JSON, treat as regular input
+          }
+        }
+        
+        // Forward input to shell stdin
         console.log(`[${session.id}] Received input:`, JSON.stringify(input));
         session.ptyProcess.stdin.write(input);
       } catch (error: any) {
