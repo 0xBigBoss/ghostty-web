@@ -172,9 +172,9 @@ const server = Bun.serve({
 
       // Send stty command to resize the PTY
       // This runs inside the shell and sets the actual PTY size
-      // Use 'stty -a' redirection to /dev/null to hide output
+      // Clear the line after to hide the command echo
       console.log(`[${session.id}] Setting PTY size via stty`);
-      shell.stdin.write(`stty cols ${cols} rows ${rows} 2>/dev/null\n`);
+      shell.stdin.write(`stty cols ${cols} rows ${rows}; clear\n`);
       
       // Wait a bit for stty to execute, then send welcome
       setTimeout(() => {
