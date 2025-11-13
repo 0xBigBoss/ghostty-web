@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { SelectionManager } from './selection-manager';
 import { Terminal } from './terminal';
 
@@ -28,7 +28,7 @@ describe('SelectionManager', () => {
   // 2. Simulating mouse events on the canvas
   // 3. Writing test data to the terminal
   // 4. Verifying selected text extraction
-  // 
+  //
   // These are better suited for browser-based integration tests
   // since they require a real DOM canvas element.
 });
