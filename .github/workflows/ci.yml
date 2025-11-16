@@ -114,31 +114,13 @@ jobs:
       - name: Build library
         run: bun run build
 
+  # Call publish workflow after all checks pass on main
   publish:
     name: publish to npm
-    runs-on: ubuntu-latest
     # Only publish on main branch pushes after all checks pass
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [fmt, lint, typecheck, test, build]
+    uses: ./.github/workflows/publish.yml
     permissions:
       contents: read
       id-token: write # Required for OIDC trusted publishing
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Required for git describe to find tags
-
-      - uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - uses: ./.github/actions/setup-zig
-        with:
-          version: 0.15.2
-
-      - name: Publish to NPM
-        uses: ./.github/actions/npm-publish
