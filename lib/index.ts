@@ -43,3 +43,9 @@ export type { SelectionCoordinates } from './selection-manager';
 // Addons
 export { FitAddon } from './addons/fit';
 export type { ITerminalDimensions } from './addons/fit';
+
+// Link providers
+export { OSC8LinkProvider } from './providers/osc8-link-provider';
+export { UrlRegexProvider } from './providers/url-regex-provider';
+export { LinkDetector } from './link-detector';
+export type { ILink, ILinkProvider, IBufferCellPosition } from './types';

@@ -108,6 +108,12 @@ export class CanvasRenderer {
   private hoveredHyperlinkId: number = 0;
   private previousHoveredHyperlinkId: number = 0;
 
+  // Regex link hover tracking (for links without hyperlink_id)
+  private hoveredLinkRange: { startX: number; startY: number; endX: number; endY: number } | null =
+    null;
+  private previousHoveredLinkRange: { startX: number; startY: number; endX: number; endY: number } | null =
+    null;
+
   constructor(canvas: HTMLCanvasElement, options: RendererOptions = {}) {
     this.canvas = canvas;
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -313,6 +319,8 @@ export class CanvasRenderer {
     // Track rows with hyperlinks that need redraw when hover changes
     const hyperlinkRows = new Set<number>();
     const hyperlinkChanged = this.hoveredHyperlinkId !== this.previousHoveredHyperlinkId;
+    const linkRangeChanged =
+      JSON.stringify(this.hoveredLinkRange) !== JSON.stringify(this.previousHoveredLinkRange);
 
     if (hyperlinkChanged) {
       // Find rows containing the old or new hovered hyperlink
@@ -350,6 +358,23 @@ export class CanvasRenderer {
       }
       // Update previous state
       this.previousHoveredHyperlinkId = this.hoveredHyperlinkId;
+    }
+
+    // Track rows affected by link range changes (for regex URLs)
+    if (linkRangeChanged) {
+      // Add rows from old range
+      if (this.previousHoveredLinkRange) {
+        for (let y = this.previousHoveredLinkRange.startY; y <= this.previousHoveredLinkRange.endY; y++) {
+          hyperlinkRows.add(y);
+        }
+      }
+      // Add rows from new range
+      if (this.hoveredLinkRange) {
+        for (let y = this.hoveredLinkRange.startY; y <= this.hoveredLinkRange.endY; y++) {
+          hyperlinkRows.add(y);
+        }
+      }
+      this.previousHoveredLinkRange = this.hoveredLinkRange;
     }
 
     // Track if anything was actually rendered
@@ -524,12 +549,32 @@ export class CanvasRenderer {
       this.ctx.stroke();
     }
 
-    // Draw hyperlink underline
+    // Draw hyperlink underline (for OSC8 hyperlinks)
     if (cell.hyperlink_id > 0) {
       const isHovered = cell.hyperlink_id === this.hoveredHyperlinkId;
 
       // Only show underline when hovered (cleaner look)
       if (isHovered) {
+        const underlineY = cellY + this.metrics.baseline + 2;
+        this.ctx.strokeStyle = '#4A90E2'; // Blue underline on hover
+        this.ctx.lineWidth = 1;
+        this.ctx.beginPath();
+        this.ctx.moveTo(cellX, underlineY);
+        this.ctx.lineTo(cellX + cellWidth, underlineY);
+        this.ctx.stroke();
+      }
+    }
+
+    // Draw regex link underline (for plain text URLs)
+    if (this.hoveredLinkRange) {
+      const range = this.hoveredLinkRange;
+      // Check if this cell is within the hovered link range
+      const isInRange =
+        (y === range.startY && x >= range.startX && (y < range.endY || x <= range.endX)) ||
+        (y > range.startY && y < range.endY) ||
+        (y === range.endY && x <= range.endX && (y > range.startY || x >= range.startX));
+
+      if (isInRange) {
         const underlineY = cellY + this.metrics.baseline + 2;
         this.ctx.strokeStyle = '#4A90E2'; // Blue underline on hover
         this.ctx.lineWidth = 1;
@@ -731,6 +776,19 @@ export class CanvasRenderer {
    */
   public setHoveredHyperlinkId(hyperlinkId: number): void {
     this.hoveredHyperlinkId = hyperlinkId;
+  }
+
+  /**
+   * Set the currently hovered link range for rendering underlines (for regex-detected URLs)
+   * Pass null to clear the hover state
+   */
+  public setHoveredLinkRange(range: {
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+  } | null): void {
+    this.hoveredLinkRange = range;
   }
 
   /**

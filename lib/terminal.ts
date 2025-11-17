@@ -28,6 +28,7 @@ import type {
 } from './interfaces';
 import { LinkDetector } from './link-detector';
 import { OSC8LinkProvider } from './providers/osc8-link-provider';
+import { UrlRegexProvider } from './providers/url-regex-provider';
 import { CanvasRenderer } from './renderer';
 import { SelectionManager } from './selection-manager';
 import type { ILink, ILinkProvider } from './types';
@@ -266,8 +267,11 @@ export class Terminal implements ITerminalCore {
       // Initialize link detection system
       this.linkDetector = new LinkDetector(this);
 
-      // Register OSC 8 hyperlink provider
+      // Register link providers
+      // OSC8 first (explicit hyperlinks take precedence)
       this.linkDetector.registerProvider(new OSC8LinkProvider(this));
+      // URL regex second (fallback for plain text URLs)
+      this.linkDetector.registerProvider(new UrlRegexProvider(this));
 
       // Setup mouse event handling for links and scrollbar
       // Use capture phase to intercept scrollbar clicks before SelectionManager
@@ -987,6 +991,32 @@ export class Terminal implements ITerminalCore {
           if (this.element) {
             this.element.style.cursor = link ? 'pointer' : 'text';
           }
+
+          // Update renderer for underline (for regex URLs without hyperlink_id)
+          if (this.renderer) {
+            if (link) {
+              // Convert buffer coordinates to viewport coordinates
+              const scrollbackLength = this.wasmTerm?.getScrollbackLength() || 0;
+
+              // Calculate viewport Y for start and end positions
+              const startViewportY = link.range.start.y - scrollbackLength + this.viewportY;
+              const endViewportY = link.range.end.y - scrollbackLength + this.viewportY;
+
+              // Only show underline if link is visible in viewport
+              if (startViewportY < this.rows && endViewportY >= 0) {
+                this.renderer.setHoveredLinkRange({
+                  startX: link.range.start.x,
+                  startY: Math.max(0, startViewportY),
+                  endX: link.range.end.x,
+                  endY: Math.min(this.rows - 1, endViewportY),
+                });
+              } else {
+                this.renderer.setHoveredLinkRange(null);
+              }
+            } else {
+              this.renderer.setHoveredLinkRange(null);
+            }
+          }
         }
       })
       .catch((err) => {
@@ -1006,6 +1036,8 @@ export class Terminal implements ITerminalCore {
 
         // The 60fps render loop will pick up the change automatically
       }
+      // Clear regex link underline
+      this.renderer.setHoveredLinkRange(null);
     }
 
     if (this.currentHoveredLink) {

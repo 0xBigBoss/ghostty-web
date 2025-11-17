@@ -143,6 +143,44 @@ ws.onmessage = (event) => {
 };
 ```
 
+### URL Detection
+
+Ghostty-web automatically detects and makes clickable:
+
+- **OSC 8 hyperlinks** - Explicit terminal escape sequences (e.g., from `ls --hyperlink`)
+- **Plain text URLs** - Common protocols detected via regex (https, http, mailto, ssh, git, ftp, tel, magnet)
+
+URLs are detected on hover and can be opened with Ctrl/Cmd+Click.
+
+```typescript
+// URL detection works automatically after opening terminal
+await term.open(container);
+
+// URLs in output become clickable automatically
+term.write('Visit https://github.com for code\r\n');
+term.write('Contact mailto:support@example.com\r\n');
+```
+
+**Custom Link Providers**
+
+Register custom providers to detect additional link types:
+
+```typescript
+import { UrlRegexProvider } from '@coder/ghostty-web';
+
+// Create custom provider
+const myProvider = {
+  provideLinks(y, callback) {
+    // Your detection logic here
+    const links = detectCustomLinks(y);
+    callback(links);
+  },
+};
+
+// Register after opening terminal
+term.registerLinkProvider(myProvider);
+```
+
 See [AGENTS.md](AGENTS.md) for development guide and code patterns.
 
 ## Why This Approach?

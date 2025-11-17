@@ -337,6 +337,18 @@
         </div>
       </div>
 
+      <div class="feature-panel">
+        <h3>🔗 URL Detection (NEW!)</h3>
+        <p style="margin: 10px 0; font-size: 0.9em; opacity: 0.8">
+          Plain text URLs are automatically detected and made clickable. Hover to see cursor change,
+          Ctrl/Cmd+Click to open.
+        </p>
+        <div class="button-grid">
+          <button class="test-button" id="btn-testUrls">📝 Write Test URLs</button>
+          <button class="test-button" id="btn-testUrlEdgeCases">⚠️ Test URL Edge Cases</button>
+        </div>
+      </div>
+
       <div class="warning">
         <strong>⚠️ Warning: Full Filesystem Access</strong>
         This demo has unrestricted access to your entire filesystem. It's meant for local
@@ -903,6 +915,66 @@
             logBufferEvent(`  Row ${i}: ${wrapped ? '↪ wrapped' : '↓ new line'}`, true);
           }
         });
+
+        // =======================================================================
+        // URL Detection Test Buttons
+        // =======================================================================
+
+        document.getElementById('btn-testUrls').addEventListener('click', () => {
+          term.write('\r\n');
+          term.write(
+            '═══════════════════════════════════════════════════════════════════════════════\r\n'
+          );
+          term.write('🔗 URL Detection Test\r\n');
+          term.write(
+            '═══════════════════════════════════════════════════════════════════════════════\r\n'
+          );
+          term.write('\r\n');
+          term.write(
+            'Hover over URLs to see cursor change, Ctrl/Cmd+Click to open in new tab:\r\n'
+          );
+          term.write('\r\n');
+          term.write(
+            '1. HTTPS: Visit https://github.com/coder/ghostty-web for the source code\r\n'
+          );
+          term.write('2. HTTP:  Check out http://example.com for more information\r\n');
+          term.write('3. Email: Contact mailto:support@example.com for help\r\n');
+          term.write('4. SSH:   Connect via ssh://user@server.com:22/path\r\n');
+          term.write('5. Git:   Clone git://github.com/user/repo.git to get started\r\n');
+          term.write('6. FTP:   Download from ftp://files.example.com/archive.zip\r\n');
+          term.write('7. Tel:   Call tel:+1-555-123-4567 for support\r\n');
+          term.write('8. Multiple URLs: https://a.com and https://b.com on same line\r\n');
+          term.write('\r\n');
+          term.write('Try clicking the URLs above!\r\n');
+          term.write('\r\n');
+        });
+
+        document.getElementById('btn-testUrlEdgeCases').addEventListener('click', () => {
+          term.write('\r\n');
+          term.write(
+            '═══════════════════════════════════════════════════════════════════════════════\r\n'
+          );
+          term.write('⚠️  URL Edge Cases\r\n');
+          term.write(
+            '═══════════════════════════════════════════════════════════════════════════════\r\n'
+          );
+          term.write('\r\n');
+          term.write('URLs should be detected correctly in these cases:\r\n');
+          term.write('\r\n');
+          term.write('1. With period:      Check https://example.com. More text here.\r\n');
+          term.write('2. With comma:       See https://example.com, then continue.\r\n');
+          term.write('3. With parentheses: (visit https://example.com) for details\r\n');
+          term.write('4. With exclamation: Visit https://example.com! Right now!\r\n');
+          term.write('5. With query:       https://example.com?foo=bar&baz=qux\r\n');
+          term.write('6. With fragment:    https://example.com/page#section-one\r\n');
+          term.write('7. With port:        https://example.com:8080/api/endpoint\r\n');
+          term.write('\r\n');
+          term.write('These should NOT be detected (not URLs):\r\n');
+          term.write('8. File path:        /home/user/file.txt\r\n');
+          term.write('9. Relative path:    ./relative/path/to/file\r\n');
+          term.write('\r\n');
+        });
+
         // Expose terminal to console for debugging
         window.term = term;
       }
