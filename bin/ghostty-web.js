@@ -469,21 +469,25 @@ function handlePTYSession(ws, req) {
 
   // WebSocket -> PTY
   ws.on('message', (data) => {
+    // Check if it's a resize message (must be object with type field)
     try {
       const msg = JSON.parse(data);
-      if (msg.type === 'resize') {
+      if (msg && typeof msg === 'object' && msg.type === 'resize') {
         // Resize PTY using stty command (same as demo/server)
         console.log(`[PTY resize] ${msg.cols}x${msg.rows}`);
         ptyProcess.stdin.write(`stty cols ${msg.cols} rows ${msg.rows}\n`);
+        return;
       }
     } catch {
-      // Not JSON, treat as input
-      console.log('[PTY] Writing to stdin:', JSON.stringify(data), 'hex:', Buffer.from(data).toString('hex'));
-      try {
-        ptyProcess.stdin.write(data);
-      } catch (err) {
-        // Process may be closed
-      }
+      // Not JSON, will be treated as input below
+    }
+    
+    // Treat as terminal input
+    console.log('[PTY] Writing to stdin:', JSON.stringify(data), 'hex:', Buffer.from(data).toString('hex'));
+    try {
+      ptyProcess.stdin.write(data);
+    } catch (err) {
+      // Process may be closed
     }
   });
 
