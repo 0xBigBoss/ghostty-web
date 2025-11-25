@@ -193,8 +193,9 @@ const HTML_TEMPLATE = `<!doctype html>
     </div>
 
     <script type="module">
-      import { Terminal, FitAddon } from '/dist/ghostty-web.js';
+      import { init, Terminal, FitAddon } from '/dist/ghostty-web.js';
 
+      await init();
       const term = new Terminal({
         cols: 80,
         rows: 24,
