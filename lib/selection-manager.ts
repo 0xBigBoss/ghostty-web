@@ -700,19 +700,25 @@ export class SelectionManager {
       const scrollAmount = SelectionManager.AUTO_SCROLL_SPEED * this.autoScrollDirection;
       (this.terminal as any).scrollLines(scrollAmount);
 
-      // Update selection end to extend with scroll
-      // When scrolling up (direction=-1), extend selection to top of viewport
-      // When scrolling down (direction=1), extend selection to bottom of viewport
-      // Use absolute coordinates so selection persists across scroll
+      // Extend selection in the scroll direction
+      // Key insight: we need to EXTEND the selection, not reset it to viewport edge
       if (this.selectionEnd) {
         const dims = this.wasmTerm.getDimensions();
         const viewportY = this.getViewportY();
         if (this.autoScrollDirection < 0) {
-          // Scrolling up - extend selection to top of current viewport
-          this.selectionEnd = { col: 0, absoluteRow: viewportY };
+          // Scrolling up - extend selection upward (decrease absoluteRow)
+          // Set to top of viewport, but only if it extends the selection
+          const topOfViewport = viewportY;
+          if (topOfViewport < this.selectionEnd.absoluteRow) {
+            this.selectionEnd = { col: 0, absoluteRow: topOfViewport };
+          }
         } else {
-          // Scrolling down - extend selection to bottom of current viewport
-          this.selectionEnd = { col: dims.cols - 1, absoluteRow: viewportY + dims.rows - 1 };
+          // Scrolling down - extend selection downward (increase absoluteRow)
+          // Set to bottom of viewport, but only if it extends the selection
+          const bottomOfViewport = viewportY + dims.rows - 1;
+          if (bottomOfViewport > this.selectionEnd.absoluteRow) {
+            this.selectionEnd = { col: dims.cols - 1, absoluteRow: bottomOfViewport };
+          }
         }
       }
 
