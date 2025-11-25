@@ -489,14 +489,6 @@ export class SelectionManager {
           e.clientY < rect.top ||
           e.clientY > rect.bottom
         ) {
-          // Mark current selection rows as dirty before updating
-          this.markCurrentSelectionDirty();
-
-          const cell = this.pixelToCell(offsetX, offsetY);
-          const absoluteRow = this.viewportRowToAbsolute(cell.row);
-          this.selectionEnd = { col: cell.col, absoluteRow };
-          this.requestRender();
-
           // Update auto-scroll direction based on mouse position
           if (e.clientY < rect.top) {
             this.startAutoScroll(-1);
@@ -504,6 +496,18 @@ export class SelectionManager {
             this.startAutoScroll(1);
           } else {
             this.stopAutoScroll();
+          }
+
+          // Only update selection position if NOT auto-scrolling
+          // During auto-scroll, the scroll handler extends the selection
+          if (this.autoScrollDirection === 0) {
+            // Mark current selection rows as dirty before updating
+            this.markCurrentSelectionDirty();
+
+            const cell = this.pixelToCell(offsetX, offsetY);
+            const absoluteRow = this.viewportRowToAbsolute(cell.row);
+            this.selectionEnd = { col: cell.col, absoluteRow };
+            this.requestRender();
           }
         }
       }
