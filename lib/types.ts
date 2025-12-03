@@ -344,6 +344,7 @@ export interface GhosttyWasmExports extends WebAssembly.Exports {
 
   // Terminal lifecycle
   ghostty_terminal_new(cols: number, rows: number): TerminalHandle;
+  ghostty_terminal_new_with_config(cols: number, rows: number, configPtr: number): TerminalHandle;
   ghostty_terminal_free(terminal: TerminalHandle): void;
   ghostty_terminal_resize(terminal: TerminalHandle, cols: number, rows: number): void;
   ghostty_terminal_write(terminal: TerminalHandle, dataPtr: number, dataLen: number): void;
@@ -427,7 +428,10 @@ export const CURSOR_STRUCT_SIZE = 8;
  */
 export const COLORS_STRUCT_SIZE = 12;
 
-// Legacy - kept for compatibility but not used with new API
+/**
+ * Terminal configuration (passed to ghostty_terminal_new_with_config)
+ * All color values use 0xRRGGBB format. A value of 0 means "use default".
+ */
 export interface GhosttyTerminalConfig {
   scrollbackLimit?: number;
   fgColor?: number;
@@ -435,6 +439,12 @@ export interface GhosttyTerminalConfig {
   cursorColor?: number;
   palette?: number[];
 }
+
+/**
+ * Size of GhosttyTerminalConfig struct in WASM memory (bytes).
+ * Layout: scrollback_limit(u32) + fg_color(u32) + bg_color(u32) + cursor_color(u32) + palette[16](u32*16)
+ * Total: 4 + 4 + 4 + 4 + 64 = 80 bytes
+ */
 export const GHOSTTY_CONFIG_SIZE = 80;
 
 /**

@@ -1399,6 +1399,117 @@ describe('Buffer Access API', () => {
   });
 });
 
+describe('Terminal Config', () => {
+  test('should pass scrollback option to WASM terminal', async () => {
+    if (typeof document === 'undefined') return;
+
+    // Create terminal with custom scrollback
+    const term = await createIsolatedTerminal({ cols: 80, rows: 24, scrollback: 500 });
+    const container = document.createElement('div');
+    term.open(container);
+
+    try {
+      // Write enough lines to fill scrollback
+      for (let i = 0; i < 600; i++) {
+        term.write(`Line ${i}\r\n`);
+      }
+
+      // Scrollback should be limited based on the config
+      const scrollbackLength = term.wasmTerm!.getScrollbackLength();
+      // With 500 scrollback limit, we wrote 600 lines so scrollback should be capped
+      // The actual value depends on ghostty's implementation but should be around 500
+      expect(scrollbackLength).toBeLessThan(600);
+      expect(scrollbackLength).toBeGreaterThan(450);
+    } finally {
+      term.dispose();
+    }
+  });
+
+  test('should pass theme colors to WASM terminal', async () => {
+    if (typeof document === 'undefined') return;
+
+    // Create terminal with custom theme
+    const term = await createIsolatedTerminal({
+      cols: 80,
+      rows: 24,
+      theme: {
+        foreground: '#00ff00', // Green
+        background: '#000080', // Navy blue
+      },
+    });
+    const container = document.createElement('div');
+    term.open(container);
+
+    try {
+      // Get the default colors from render state
+      const colors = term.wasmTerm!.getColors();
+
+      // Verify foreground is green (0x00FF00)
+      expect(colors.foreground.r).toBe(0);
+      expect(colors.foreground.g).toBe(255);
+      expect(colors.foreground.b).toBe(0);
+
+      // Verify background is navy (0x000080)
+      expect(colors.background.r).toBe(0);
+      expect(colors.background.g).toBe(0);
+      expect(colors.background.b).toBe(128);
+    } finally {
+      term.dispose();
+    }
+  });
+
+  test('should pass palette colors to WASM terminal', async () => {
+    if (typeof document === 'undefined') return;
+
+    // Create terminal with custom red color in palette
+    const term = await createIsolatedTerminal({
+      cols: 80,
+      rows: 24,
+      theme: {
+        red: '#ff0000', // Bright red for ANSI red
+      },
+    });
+    const container = document.createElement('div');
+    term.open(container);
+
+    try {
+      // Write red text using ANSI escape code
+      term.write('\x1b[31mRed text\x1b[0m');
+
+      // Get first cell - should have red foreground
+      const line = term.wasmTerm!.getLine(0);
+      const firstCell = line[0];
+
+      // The foreground should be red (0xFF0000)
+      expect(firstCell.fg_r).toBe(255);
+      expect(firstCell.fg_g).toBe(0);
+      expect(firstCell.fg_b).toBe(0);
+    } finally {
+      term.dispose();
+    }
+  });
+
+  test('should use default config when no options provided', async () => {
+    if (typeof document === 'undefined') return;
+
+    // Create terminal with no config
+    const term = await createIsolatedTerminal({ cols: 80, rows: 24 });
+    const container = document.createElement('div');
+    term.open(container);
+
+    try {
+      // Should still work and have reasonable defaults
+      const colors = term.wasmTerm!.getColors();
+
+      // Default colors should be set (light gray foreground, black background)
+      expect(colors.foreground).toBeDefined();
+      expect(colors.background).toBeDefined();
+    } finally {
+      term.dispose();
+    }
+  });
+});
+
 describe('Terminal Modes', () => {
   test('should detect bracketed paste mode', async () => {
     if (typeof document === 'undefined') return;

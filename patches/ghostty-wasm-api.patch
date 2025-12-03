@@ -27,131 +27,12 @@ index 4f8fef88e..ca9fb1d4d 100644
  #include <ghostty/vt/osc.h>
  #include <ghostty/vt/sgr.h>
  #include <ghostty/vt/key.h>
-diff --git a/src/lib_vt.zig b/src/lib_vt.zig
-index 03a883e20..22e4fe909 100644
---- a/src/lib_vt.zig
-+++ b/src/lib_vt.zig
-@@ -140,6 +140,34 @@ comptime {
-         @export(&c.sgr_unknown_partial, .{ .name = "ghostty_sgr_unknown_partial" });
-         @export(&c.sgr_attribute_tag, .{ .name = "ghostty_sgr_attribute_tag" });
-         @export(&c.sgr_attribute_value, .{ .name = "ghostty_sgr_attribute_value" });
-+        // Terminal lifecycle
-+        @export(&c.terminal_new, .{ .name = "ghostty_terminal_new" });
-+        @export(&c.terminal_free, .{ .name = "ghostty_terminal_free" });
-+        @export(&c.terminal_resize, .{ .name = "ghostty_terminal_resize" });
-+        @export(&c.terminal_write, .{ .name = "ghostty_terminal_write" });
-+
-+        // RenderState API - high-performance rendering
-+        @export(&c.render_state_update, .{ .name = "ghostty_render_state_update" });
-+        @export(&c.render_state_get_cols, .{ .name = "ghostty_render_state_get_cols" });
-+        @export(&c.render_state_get_rows, .{ .name = "ghostty_render_state_get_rows" });
-+        @export(&c.render_state_get_cursor_x, .{ .name = "ghostty_render_state_get_cursor_x" });
-+        @export(&c.render_state_get_cursor_y, .{ .name = "ghostty_render_state_get_cursor_y" });
-+        @export(&c.render_state_get_cursor_visible, .{ .name = "ghostty_render_state_get_cursor_visible" });
-+        @export(&c.render_state_get_bg_color, .{ .name = "ghostty_render_state_get_bg_color" });
-+        @export(&c.render_state_get_fg_color, .{ .name = "ghostty_render_state_get_fg_color" });
-+        @export(&c.render_state_is_row_dirty, .{ .name = "ghostty_render_state_is_row_dirty" });
-+        @export(&c.render_state_mark_clean, .{ .name = "ghostty_render_state_mark_clean" });
-+        @export(&c.render_state_get_viewport, .{ .name = "ghostty_render_state_get_viewport" });
-+
-+        // Terminal modes
-+        @export(&c.terminal_is_alternate_screen, .{ .name = "ghostty_terminal_is_alternate_screen" });
-+        @export(&c.terminal_has_mouse_tracking, .{ .name = "ghostty_terminal_has_mouse_tracking" });
-+        @export(&c.terminal_get_mode, .{ .name = "ghostty_terminal_get_mode" });
-+
-+        // Scrollback API
-+        @export(&c.terminal_get_scrollback_length, .{ .name = "ghostty_terminal_get_scrollback_length" });
-+        @export(&c.terminal_get_scrollback_line, .{ .name = "ghostty_terminal_get_scrollback_line" });
-+        @export(&c.terminal_is_row_wrapped, .{ .name = "ghostty_terminal_is_row_wrapped" });
- 
-         // On Wasm we need to export our allocator convenience functions.
-         if (builtin.target.cpu.arch.isWasm()) {
-diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
-index bc92597f5..cb5ccb3a1 100644
---- a/src/terminal/c/main.zig
-+++ b/src/terminal/c/main.zig
-@@ -4,6 +4,7 @@ pub const key_event = @import("key_event.zig");
- pub const key_encode = @import("key_encode.zig");
- pub const paste = @import("paste.zig");
- pub const sgr = @import("sgr.zig");
-+pub const terminal = @import("terminal.zig");
- 
- // The full C API, unexported.
- pub const osc_new = osc.new;
-@@ -52,6 +53,35 @@ pub const key_encoder_encode = key_encode.encode;
- 
- pub const paste_is_safe = paste.is_safe;
- 
-+// Terminal lifecycle
-+pub const terminal_new = terminal.new;
-+pub const terminal_free = terminal.free;
-+pub const terminal_resize = terminal.resize;
-+pub const terminal_write = terminal.write;
-+
-+// RenderState API - high-performance rendering
-+pub const render_state_update = terminal.renderStateUpdate;
-+pub const render_state_get_cols = terminal.renderStateGetCols;
-+pub const render_state_get_rows = terminal.renderStateGetRows;
-+pub const render_state_get_cursor_x = terminal.renderStateGetCursorX;
-+pub const render_state_get_cursor_y = terminal.renderStateGetCursorY;
-+pub const render_state_get_cursor_visible = terminal.renderStateGetCursorVisible;
-+pub const render_state_get_bg_color = terminal.renderStateGetBgColor;
-+pub const render_state_get_fg_color = terminal.renderStateGetFgColor;
-+pub const render_state_is_row_dirty = terminal.renderStateIsRowDirty;
-+pub const render_state_mark_clean = terminal.renderStateMarkClean;
-+pub const render_state_get_viewport = terminal.renderStateGetViewport;
-+
-+// Terminal modes
-+pub const terminal_is_alternate_screen = terminal.isAlternateScreen;
-+pub const terminal_has_mouse_tracking = terminal.hasMouseTracking;
-+pub const terminal_get_mode = terminal.getMode;
-+
-+// Scrollback API
-+pub const terminal_get_scrollback_length = terminal.getScrollbackLength;
-+pub const terminal_get_scrollback_line = terminal.getScrollbackLine;
-+pub const terminal_is_row_wrapped = terminal.isRowWrapped;
-+
- test {
-     _ = color;
-     _ = osc;
-@@ -59,6 +89,7 @@ test {
-     _ = key_encode;
-     _ = paste;
-     _ = sgr;
-+    _ = terminal;
- 
-     // We want to make sure we run the tests for the C allocator interface.
-     _ = @import("../../lib/allocator.zig");
-diff --git a/src/terminal/render.zig b/src/terminal/render.zig
-index b6430ea34..10e0ef79d 100644
---- a/src/terminal/render.zig
-+++ b/src/terminal/render.zig
-@@ -322,13 +322,14 @@ pub const RenderState = struct {
-         // Colors.
-         self.colors.cursor = t.colors.cursor.get();
-         self.colors.palette = t.colors.palette.current;
--        bg_fg: {
-+        {
-             // Background/foreground can be unset initially which would
--            // depend on "default" background/foreground. The expected use
--            // case of Terminal is that the caller set their own configured
--            // defaults on load so this doesn't happen.
--            const bg = t.colors.background.get() orelse break :bg_fg;
--            const fg = t.colors.foreground.get() orelse break :bg_fg;
-+            // depend on "default" background/foreground. Use sensible defaults
-+            // (black background, light gray foreground) when not explicitly set.
-+            const default_bg: color.RGB = .{ .r = 0, .g = 0, .b = 0 };
-+            const default_fg: color.RGB = .{ .r = 204, .g = 204, .b = 204 };
-+            const bg = t.colors.background.get() orelse default_bg;
-+            const fg = t.colors.foreground.get() orelse default_fg;
-             if (t.modes.get(.reverse_colors)) {
-                 self.colors.background = fg;
-                 self.colors.foreground = bg;
 diff --git a/include/ghostty/vt/terminal.h b/include/ghostty/vt/terminal.h
 new file mode 100644
+index 000000000..e371164b6
 --- /dev/null
 +++ b/include/ghostty/vt/terminal.h
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,192 @@
 +/**
 + * @file terminal.h
 + *
@@ -186,6 +67,23 @@ new file mode 100644
 +/** Opaque terminal handle */
 +typedef void* GhosttyTerminal;
 +
++/**
++ * Terminal configuration.
++ * All color values use 0xRRGGBB format. A value of 0 means "use default".
++ */
++typedef struct {
++    /** Maximum scrollback lines (0 = unlimited) */
++    uint32_t scrollback_limit;
++    /** Default foreground color (0xRRGGBB, 0 = default) */
++    uint32_t fg_color;
++    /** Default background color (0xRRGGBB, 0 = default) */
++    uint32_t bg_color;
++    /** Cursor color (0xRRGGBB, 0 = default) */
++    uint32_t cursor_color;
++    /** ANSI color palette (16 colors, 0xRRGGBB format, 0 = default) */
++    uint32_t palette[16];
++} GhosttyTerminalConfig;
++
 +/** Cell structure - 16 bytes, pre-resolved colors */
 +typedef struct {
 +    uint32_t codepoint;
@@ -218,8 +116,21 @@ new file mode 100644
 + * Lifecycle
 + * ========================================================================= */
 +
-+/** Create a new terminal */
++/** Create a new terminal with default settings */
 +GhosttyTerminal ghostty_terminal_new(int cols, int rows);
++
++/**
++ * Create a new terminal with custom configuration.
++ * @param cols Number of columns
++ * @param rows Number of rows
++ * @param config Configuration options (NULL = use defaults)
++ * @return Terminal handle, or NULL on failure
++ */
++GhosttyTerminal ghostty_terminal_new_with_config(
++    int cols,
++    int rows,
++    const GhosttyTerminalConfig* config
++);
 +
 +/** Free a terminal */
 +void ghostty_terminal_free(GhosttyTerminal term);
@@ -314,11 +225,109 @@ new file mode 100644
 +#endif
 +
 +#endif /* GHOSTTY_VT_TERMINAL_H */
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index 03a883e20..35f6b787f 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -140,6 +140,35 @@ comptime {
+         @export(&c.sgr_unknown_partial, .{ .name = "ghostty_sgr_unknown_partial" });
+         @export(&c.sgr_attribute_tag, .{ .name = "ghostty_sgr_attribute_tag" });
+         @export(&c.sgr_attribute_value, .{ .name = "ghostty_sgr_attribute_value" });
++        // Terminal lifecycle
++        @export(&c.terminal_new, .{ .name = "ghostty_terminal_new" });
++        @export(&c.terminal_new_with_config, .{ .name = "ghostty_terminal_new_with_config" });
++        @export(&c.terminal_free, .{ .name = "ghostty_terminal_free" });
++        @export(&c.terminal_resize, .{ .name = "ghostty_terminal_resize" });
++        @export(&c.terminal_write, .{ .name = "ghostty_terminal_write" });
++
++        // RenderState API - high-performance rendering
++        @export(&c.render_state_update, .{ .name = "ghostty_render_state_update" });
++        @export(&c.render_state_get_cols, .{ .name = "ghostty_render_state_get_cols" });
++        @export(&c.render_state_get_rows, .{ .name = "ghostty_render_state_get_rows" });
++        @export(&c.render_state_get_cursor_x, .{ .name = "ghostty_render_state_get_cursor_x" });
++        @export(&c.render_state_get_cursor_y, .{ .name = "ghostty_render_state_get_cursor_y" });
++        @export(&c.render_state_get_cursor_visible, .{ .name = "ghostty_render_state_get_cursor_visible" });
++        @export(&c.render_state_get_bg_color, .{ .name = "ghostty_render_state_get_bg_color" });
++        @export(&c.render_state_get_fg_color, .{ .name = "ghostty_render_state_get_fg_color" });
++        @export(&c.render_state_is_row_dirty, .{ .name = "ghostty_render_state_is_row_dirty" });
++        @export(&c.render_state_mark_clean, .{ .name = "ghostty_render_state_mark_clean" });
++        @export(&c.render_state_get_viewport, .{ .name = "ghostty_render_state_get_viewport" });
++
++        // Terminal modes
++        @export(&c.terminal_is_alternate_screen, .{ .name = "ghostty_terminal_is_alternate_screen" });
++        @export(&c.terminal_has_mouse_tracking, .{ .name = "ghostty_terminal_has_mouse_tracking" });
++        @export(&c.terminal_get_mode, .{ .name = "ghostty_terminal_get_mode" });
++
++        // Scrollback API
++        @export(&c.terminal_get_scrollback_length, .{ .name = "ghostty_terminal_get_scrollback_length" });
++        @export(&c.terminal_get_scrollback_line, .{ .name = "ghostty_terminal_get_scrollback_line" });
++        @export(&c.terminal_is_row_wrapped, .{ .name = "ghostty_terminal_is_row_wrapped" });
+ 
+         // On Wasm we need to export our allocator convenience functions.
+         if (builtin.target.cpu.arch.isWasm()) {
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index bc92597f5..6a97183fe 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -4,6 +4,7 @@ pub const key_event = @import("key_event.zig");
+ pub const key_encode = @import("key_encode.zig");
+ pub const paste = @import("paste.zig");
+ pub const sgr = @import("sgr.zig");
++pub const terminal = @import("terminal.zig");
+ 
+ // The full C API, unexported.
+ pub const osc_new = osc.new;
+@@ -52,6 +53,36 @@ pub const key_encoder_encode = key_encode.encode;
+ 
+ pub const paste_is_safe = paste.is_safe;
+ 
++// Terminal lifecycle
++pub const terminal_new = terminal.new;
++pub const terminal_new_with_config = terminal.newWithConfig;
++pub const terminal_free = terminal.free;
++pub const terminal_resize = terminal.resize;
++pub const terminal_write = terminal.write;
++
++// RenderState API - high-performance rendering
++pub const render_state_update = terminal.renderStateUpdate;
++pub const render_state_get_cols = terminal.renderStateGetCols;
++pub const render_state_get_rows = terminal.renderStateGetRows;
++pub const render_state_get_cursor_x = terminal.renderStateGetCursorX;
++pub const render_state_get_cursor_y = terminal.renderStateGetCursorY;
++pub const render_state_get_cursor_visible = terminal.renderStateGetCursorVisible;
++pub const render_state_get_bg_color = terminal.renderStateGetBgColor;
++pub const render_state_get_fg_color = terminal.renderStateGetFgColor;
++pub const render_state_is_row_dirty = terminal.renderStateIsRowDirty;
++pub const render_state_mark_clean = terminal.renderStateMarkClean;
++pub const render_state_get_viewport = terminal.renderStateGetViewport;
++
++// Terminal modes
++pub const terminal_is_alternate_screen = terminal.isAlternateScreen;
++pub const terminal_has_mouse_tracking = terminal.hasMouseTracking;
++pub const terminal_get_mode = terminal.getMode;
++
++// Scrollback API
++pub const terminal_get_scrollback_length = terminal.getScrollbackLength;
++pub const terminal_get_scrollback_line = terminal.getScrollbackLine;
++pub const terminal_is_row_wrapped = terminal.isRowWrapped;
++
+ test {
+     _ = color;
+     _ = osc;
+@@ -59,6 +90,7 @@ test {
+     _ = key_encode;
+     _ = paste;
+     _ = sgr;
++    _ = terminal;
+ 
+     // We want to make sure we run the tests for the C allocator interface.
+     _ = @import("../../lib/allocator.zig");
 diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
 new file mode 100644
+index 000000000..3868eb17b
 --- /dev/null
 +++ b/src/terminal/c/terminal.zig
-@@ -0,0 +1,503 @@
+@@ -0,0 +1,567 @@
 +//! C API wrapper for Terminal
 +//!
 +//! This provides a minimal, high-performance interface to Ghostty's Terminal
@@ -381,11 +390,28 @@ new file mode 100644
 +    full = 2,
 +};
 +
++/// C-compatible terminal configuration
++pub const GhosttyTerminalConfig = extern struct {
++    scrollback_limit: u32,
++    fg_color: u32,
++    bg_color: u32,
++    cursor_color: u32,
++    palette: [16]u32,
++};
++
 +// ============================================================================
 +// Lifecycle
 +// ============================================================================
 +
 +pub fn new(cols: c_int, rows: c_int) callconv(.c) ?*anyopaque {
++    return newWithConfig(cols, rows, null);
++}
++
++pub fn newWithConfig(
++    cols: c_int,
++    rows: c_int,
++    config_: ?*const GhosttyTerminalConfig,
++) callconv(.c) ?*anyopaque {
 +    const alloc = if (builtin.target.cpu.arch.isWasm())
 +        std.heap.wasm_allocator
 +    else
@@ -393,10 +419,57 @@ new file mode 100644
 +
 +    const wrapper = alloc.create(TerminalWrapper) catch return null;
 +
++    // Parse config or use defaults
++    const scrollback_limit: usize = if (config_) |cfg|
++        if (cfg.scrollback_limit == 0) std.math.maxInt(usize) else cfg.scrollback_limit
++    else
++        10_000;
++
++    // Setup terminal colors
++    var colors = Terminal.Colors.default;
++    if (config_) |cfg| {
++        if (cfg.fg_color != 0) {
++            const rgb = color.RGB{
++                .r = @truncate((cfg.fg_color >> 16) & 0xFF),
++                .g = @truncate((cfg.fg_color >> 8) & 0xFF),
++                .b = @truncate(cfg.fg_color & 0xFF),
++            };
++            colors.foreground = color.DynamicRGB.init(rgb);
++        }
++        if (cfg.bg_color != 0) {
++            const rgb = color.RGB{
++                .r = @truncate((cfg.bg_color >> 16) & 0xFF),
++                .g = @truncate((cfg.bg_color >> 8) & 0xFF),
++                .b = @truncate(cfg.bg_color & 0xFF),
++            };
++            colors.background = color.DynamicRGB.init(rgb);
++        }
++        if (cfg.cursor_color != 0) {
++            const rgb = color.RGB{
++                .r = @truncate((cfg.cursor_color >> 16) & 0xFF),
++                .g = @truncate((cfg.cursor_color >> 8) & 0xFF),
++                .b = @truncate(cfg.cursor_color & 0xFF),
++            };
++            colors.cursor = color.DynamicRGB.init(rgb);
++        }
++        // Apply palette colors (0 = use default)
++        for (cfg.palette, 0..) |palette_color, i| {
++            if (palette_color != 0) {
++                const rgb = color.RGB{
++                    .r = @truncate((palette_color >> 16) & 0xFF),
++                    .g = @truncate((palette_color >> 8) & 0xFF),
++                    .b = @truncate(palette_color & 0xFF),
++                };
++                colors.palette.set(@intCast(i), rgb);
++            }
++        }
++    }
++
 +    wrapper.terminal = Terminal.init(alloc, .{
 +        .cols = @intCast(cols),
 +        .rows = @intCast(rows),
-+        .max_scrollback = 10_000,
++        .max_scrollback = scrollback_limit,
++        .colors = colors,
 +    }) catch {
 +        alloc.destroy(wrapper);
 +        return null;
@@ -822,3 +895,28 @@ new file mode 100644
 +    try std.testing.expectEqual(@as(u32, 'l'), cells[3].codepoint);
 +    try std.testing.expectEqual(@as(u32, 'o'), cells[4].codepoint);
 +}
+diff --git a/src/terminal/render.zig b/src/terminal/render.zig
+index b6430ea34..10e0ef79d 100644
+--- a/src/terminal/render.zig
++++ b/src/terminal/render.zig
+@@ -322,13 +322,14 @@ pub const RenderState = struct {
+         // Colors.
+         self.colors.cursor = t.colors.cursor.get();
+         self.colors.palette = t.colors.palette.current;
+-        bg_fg: {
++        {
+             // Background/foreground can be unset initially which would
+-            // depend on "default" background/foreground. The expected use
+-            // case of Terminal is that the caller set their own configured
+-            // defaults on load so this doesn't happen.
+-            const bg = t.colors.background.get() orelse break :bg_fg;
+-            const fg = t.colors.foreground.get() orelse break :bg_fg;
++            // depend on "default" background/foreground. Use sensible defaults
++            // (black background, light gray foreground) when not explicitly set.
++            const default_bg: color.RGB = .{ .r = 0, .g = 0, .b = 0 };
++            const default_fg: color.RGB = .{ .r = 204, .g = 204, .b = 204 };
++            const bg = t.colors.background.get() orelse default_bg;
++            const fg = t.colors.foreground.get() orelse default_fg;
+             if (t.modes.get(.reverse_colors)) {
+                 self.colors.background = fg;
+                 self.colors.foreground = bg;
