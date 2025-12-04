@@ -492,6 +492,60 @@ describe('InputHandler', () => {
       expect(dataReceived.length).toBe(1);
       expect(dataReceived[0]).toMatch(/\x1b(\[C|OC)/);
     });
+
+    test('sends CSI sequences in normal cursor mode (mode 1 off)', () => {
+      // Create handler with getMode callback that returns false (normal mode)
+      const handler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {
+          bellCalled = true;
+        },
+        undefined,
+        undefined,
+        (_mode: number) => false // Normal cursor mode
+      );
+
+      simulateKey(container, createKeyEvent('ArrowUp', 'ArrowUp'));
+      simulateKey(container, createKeyEvent('ArrowDown', 'ArrowDown'));
+      simulateKey(container, createKeyEvent('ArrowLeft', 'ArrowLeft'));
+      simulateKey(container, createKeyEvent('ArrowRight', 'ArrowRight'));
+
+      expect(dataReceived.length).toBe(4);
+      // Normal mode: CSI sequences (ESC[A, ESC[B, ESC[D, ESC[C)
+      expect(dataReceived[0]).toBe('\x1b[A');
+      expect(dataReceived[1]).toBe('\x1b[B');
+      expect(dataReceived[2]).toBe('\x1b[D');
+      expect(dataReceived[3]).toBe('\x1b[C');
+    });
+
+    test('sends SS3 sequences in application cursor mode (mode 1 on)', () => {
+      // Create handler with getMode callback that returns true for mode 1
+      const handler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {
+          bellCalled = true;
+        },
+        undefined,
+        undefined,
+        (mode: number) => mode === 1 // Application cursor mode enabled
+      );
+
+      simulateKey(container, createKeyEvent('ArrowUp', 'ArrowUp'));
+      simulateKey(container, createKeyEvent('ArrowDown', 'ArrowDown'));
+      simulateKey(container, createKeyEvent('ArrowLeft', 'ArrowLeft'));
+      simulateKey(container, createKeyEvent('ArrowRight', 'ArrowRight'));
+
+      expect(dataReceived.length).toBe(4);
+      // Application mode: SS3 sequences (ESCOA, ESCOB, ESCOD, ESCOC)
+      expect(dataReceived[0]).toBe('\x1bOA');
+      expect(dataReceived[1]).toBe('\x1bOB');
+      expect(dataReceived[2]).toBe('\x1bOD');
+      expect(dataReceived[3]).toBe('\x1bOC');
+    });
   });
 
   describe('Function Keys', () => {

@@ -124,138 +124,203 @@ export enum KeyAction {
 }
 
 /**
- * Physical key codes (based on USB HID Usage Tables - Keyboard/Keypad Page 0x07)
- * Reference: https://www.usb.org/sites/default/files/hut1_21.pdf
+ * Physical key codes matching Ghostty's internal Key enum.
+ * These values are used by Ghostty's key encoder to produce correct escape sequences.
+ * Reference: ghostty/src/input/key.zig
  */
 export enum Key {
-  // Letters (0x04-0x1D)
-  A = 4,
-  B = 5,
-  C = 6,
-  D = 7,
-  E = 8,
-  F = 9,
-  G = 10,
-  H = 11,
-  I = 12,
-  J = 13,
-  K = 14,
-  L = 15,
-  M = 16,
-  N = 17,
-  O = 18,
-  P = 19,
-  Q = 20,
-  R = 21,
-  S = 22,
-  T = 23,
-  U = 24,
-  V = 25,
-  W = 26,
-  X = 27,
-  Y = 28,
-  Z = 29,
+  // Unidentified key
+  UNIDENTIFIED = 0,
 
-  // Numbers (0x1E-0x27)
-  ONE = 30,
-  TWO = 31,
-  THREE = 32,
-  FOUR = 33,
-  FIVE = 34,
-  SIX = 35,
-  SEVEN = 36,
-  EIGHT = 37,
-  NINE = 38,
-  ZERO = 39,
+  // Writing System Keys
+  GRAVE = 1, // ` and ~
+  BACKSLASH = 2, // \ and |
+  BRACKET_LEFT = 3, // [ and {
+  BRACKET_RIGHT = 4, // ] and }
+  COMMA = 5, // , and <
+  ZERO = 6,
+  ONE = 7,
+  TWO = 8,
+  THREE = 9,
+  FOUR = 10,
+  FIVE = 11,
+  SIX = 12,
+  SEVEN = 13,
+  EIGHT = 14,
+  NINE = 15,
+  EQUAL = 16, // = and +
+  INTL_BACKSLASH = 17,
+  INTL_RO = 18,
+  INTL_YEN = 19,
+  A = 20,
+  B = 21,
+  C = 22,
+  D = 23,
+  E = 24,
+  F = 25,
+  G = 26,
+  H = 27,
+  I = 28,
+  J = 29,
+  K = 30,
+  L = 31,
+  M = 32,
+  N = 33,
+  O = 34,
+  P = 35,
+  Q = 36,
+  R = 37,
+  S = 38,
+  T = 39,
+  U = 40,
+  V = 41,
+  W = 42,
+  X = 43,
+  Y = 44,
+  Z = 45,
+  MINUS = 46, // - and _
+  PERIOD = 47, // . and >
+  QUOTE = 48, // ' and "
+  SEMICOLON = 49, // ; and :
+  SLASH = 50, // / and ?
 
-  // Special keys (0x28-0x2C)
-  ENTER = 40,
-  ESCAPE = 41,
-  BACKSPACE = 42,
-  TAB = 43,
-  SPACE = 44,
+  // Functional Keys
+  ALT_LEFT = 51,
+  ALT_RIGHT = 52,
+  BACKSPACE = 53,
+  CAPS_LOCK = 54,
+  CONTEXT_MENU = 55,
+  CONTROL_LEFT = 56,
+  CONTROL_RIGHT = 57,
+  ENTER = 58,
+  META_LEFT = 59,
+  META_RIGHT = 60,
+  SHIFT_LEFT = 61,
+  SHIFT_RIGHT = 62,
+  SPACE = 63,
+  TAB = 64,
+  CONVERT = 65,
+  KANA_MODE = 66,
+  NON_CONVERT = 67,
 
-  // Punctuation (0x2D-0x38)
-  MINUS = 45, // - and _
-  EQUAL = 46, // = and +
-  BRACKET_LEFT = 47, // [ and {
-  BRACKET_RIGHT = 48, // ] and }
-  BACKSLASH = 49, // \ and |
-  SEMICOLON = 51, // ; and :
-  QUOTE = 52, // ' and "
-  GRAVE = 53, // ` and ~
-  COMMA = 54, // , and <
-  PERIOD = 55, // . and >
-  SLASH = 56, // / and ?
+  // Control Pad Section
+  DELETE = 68,
+  END = 69,
+  HELP = 70,
+  HOME = 71,
+  INSERT = 72,
+  PAGE_DOWN = 73,
+  PAGE_UP = 74,
 
-  // Function keys (0x3A-0x45)
-  CAPS_LOCK = 57,
-  F1 = 58,
-  F2 = 59,
-  F3 = 60,
-  F4 = 61,
-  F5 = 62,
-  F6 = 63,
-  F7 = 64,
-  F8 = 65,
-  F9 = 66,
-  F10 = 67,
-  F11 = 68,
-  F12 = 69,
+  // Arrow Pad Section
+  DOWN = 75,
+  LEFT = 76,
+  RIGHT = 77,
+  UP = 78,
 
-  // Special keys (0x46-0x4E)
-  PRINT_SCREEN = 70,
-  SCROLL_LOCK = 71,
-  PAUSE = 72,
-  INSERT = 73,
-  HOME = 74,
-  PAGE_UP = 75,
-  DELETE = 76,
-  END = 77,
-  PAGE_DOWN = 78,
+  // Numpad Section
+  NUM_LOCK = 79,
+  KP_0 = 80,
+  KP_1 = 81,
+  KP_2 = 82,
+  KP_3 = 83,
+  KP_4 = 84,
+  KP_5 = 85,
+  KP_6 = 86,
+  KP_7 = 87,
+  KP_8 = 88,
+  KP_9 = 89,
+  KP_PLUS = 90, // Keypad +
+  KP_BACKSPACE = 91,
+  KP_CLEAR = 92,
+  KP_CLEAR_ENTRY = 93,
+  KP_COMMA = 94,
+  KP_PERIOD = 95, // Keypad .
+  KP_DIVIDE = 96, // Keypad /
+  KP_ENTER = 97, // Keypad Enter
+  KP_EQUAL = 98,
+  KP_MEMORY_ADD = 99,
+  KP_MEMORY_CLEAR = 100,
+  KP_MEMORY_RECALL = 101,
+  KP_MEMORY_STORE = 102,
+  KP_MEMORY_SUBTRACT = 103,
+  KP_MULTIPLY = 104, // Keypad *
+  KP_PAREN_LEFT = 105,
+  KP_PAREN_RIGHT = 106,
+  KP_MINUS = 107, // Keypad -
+  KP_SEPARATOR = 108,
+  NUMPAD_UP = 109,
+  NUMPAD_DOWN = 110,
+  NUMPAD_RIGHT = 111,
+  NUMPAD_LEFT = 112,
+  NUMPAD_BEGIN = 113,
+  NUMPAD_HOME = 114,
+  NUMPAD_END = 115,
+  NUMPAD_INSERT = 116,
+  NUMPAD_DELETE = 117,
+  NUMPAD_PAGE_UP = 118,
+  NUMPAD_PAGE_DOWN = 119,
 
-  // Arrow keys (0x4F-0x52)
-  RIGHT = 79,
-  LEFT = 80,
-  DOWN = 81,
-  UP = 82,
+  // Function Keys
+  ESCAPE = 120,
+  F1 = 121,
+  F2 = 122,
+  F3 = 123,
+  F4 = 124,
+  F5 = 125,
+  F6 = 126,
+  F7 = 127,
+  F8 = 128,
+  F9 = 129,
+  F10 = 130,
+  F11 = 131,
+  F12 = 132,
+  F13 = 133,
+  F14 = 134,
+  F15 = 135,
+  F16 = 136,
+  F17 = 137,
+  F18 = 138,
+  F19 = 139,
+  F20 = 140,
+  F21 = 141,
+  F22 = 142,
+  F23 = 143,
+  F24 = 144,
+  F25 = 145,
+  FN_LOCK = 146,
+  PRINT_SCREEN = 147,
+  SCROLL_LOCK = 148,
+  PAUSE = 149,
 
-  // Keypad (0x53-0x63)
-  NUM_LOCK = 83,
-  KP_DIVIDE = 84, // Keypad /
-  KP_MULTIPLY = 85, // Keypad *
-  KP_MINUS = 86, // Keypad -
-  KP_PLUS = 87, // Keypad +
-  KP_ENTER = 88, // Keypad Enter
-  KP_1 = 89,
-  KP_2 = 90,
-  KP_3 = 91,
-  KP_4 = 92,
-  KP_5 = 93,
-  KP_6 = 94,
-  KP_7 = 95,
-  KP_8 = 96,
-  KP_9 = 97,
-  KP_0 = 98,
-  KP_PERIOD = 99, // Keypad .
+  // Media Keys
+  BROWSER_BACK = 150,
+  BROWSER_FAVORITES = 151,
+  BROWSER_FORWARD = 152,
+  BROWSER_HOME = 153,
+  BROWSER_REFRESH = 154,
+  BROWSER_SEARCH = 155,
+  BROWSER_STOP = 156,
+  EJECT = 157,
+  LAUNCH_APP_1 = 158,
+  LAUNCH_APP_2 = 159,
+  LAUNCH_MAIL = 160,
+  MEDIA_PLAY_PAUSE = 161,
+  MEDIA_SELECT = 162,
+  MEDIA_STOP = 163,
+  MEDIA_TRACK_NEXT = 164,
+  MEDIA_TRACK_PREVIOUS = 165,
+  POWER = 166,
+  SLEEP = 167,
+  AUDIO_VOLUME_DOWN = 168,
+  AUDIO_VOLUME_MUTE = 169,
+  AUDIO_VOLUME_UP = 170,
+  WAKE_UP = 171,
 
-  // International keys (0x64-0x65)
-  NON_US_BACKSLASH = 100, // \ and | on non-US keyboards
-  APPLICATION = 101, // Context menu key
-
-  // Additional function keys (0x68-0x73) - optional but included for completeness
-  F13 = 104,
-  F14 = 105,
-  F15 = 106,
-  F16 = 107,
-  F17 = 108,
-  F18 = 109,
-  F19 = 110,
-  F20 = 111,
-  F21 = 112,
-  F22 = 113,
-  F23 = 114,
-  F24 = 115,
+  // Clipboard Keys
+  COPY = 172,
+  CUT = 173,
+  PASTE = 174,
 }
 
 /**

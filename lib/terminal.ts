@@ -408,7 +408,11 @@ export class Terminal implements ITerminalCore {
           // Forward key events
           this.keyEmitter.fire(keyEvent);
         },
-        this.customKeyEventHandler
+        this.customKeyEventHandler,
+        (mode: number) => {
+          // Query terminal mode state (e.g., mode 1 for application cursor mode)
+          return this.wasmTerm?.getMode(mode, false) ?? false;
+        }
       );
 
       // Create selection manager (pass textarea for context menu positioning)

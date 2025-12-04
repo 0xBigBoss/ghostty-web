@@ -16,7 +16,7 @@
 import type { Ghostty } from './ghostty';
 import type { KeyEncoder } from './ghostty';
 import type { IKeyEvent } from './interfaces';
-import { Key, KeyAction, Mods } from './types';
+import { Key, KeyAction, KeyEncoderOption, Mods } from './types';
 
 /**
  * Map KeyboardEvent.code values to USB HID Key enum values
@@ -135,8 +135,8 @@ const KEY_MAP: Record<string, Key> = {
   NumpadDecimal: Key.KP_PERIOD,
 
   // International
-  IntlBackslash: Key.NON_US_BACKSLASH,
-  ContextMenu: Key.APPLICATION,
+  IntlBackslash: Key.INTL_BACKSLASH,
+  ContextMenu: Key.CONTEXT_MENU,
 
   // Additional function keys
   F13: Key.F13,
@@ -165,6 +165,7 @@ export class InputHandler {
   private onBellCallback: () => void;
   private onKeyCallback?: (keyEvent: IKeyEvent) => void;
   private customKeyEventHandler?: (event: KeyboardEvent) => boolean;
+  private getModeCallback?: (mode: number) => boolean;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
   private keypressListener: ((e: KeyboardEvent) => void) | null = null;
   private pasteListener: ((e: ClipboardEvent) => void) | null = null;
@@ -178,6 +179,7 @@ export class InputHandler {
    * @param onBell - Callback for bell/beep event
    * @param onKey - Optional callback for raw key events
    * @param customKeyEventHandler - Optional custom key event handler
+   * @param getMode - Optional callback to query terminal mode state (for application cursor mode)
    */
   constructor(
     ghostty: Ghostty,
@@ -185,7 +187,8 @@ export class InputHandler {
     onData: (data: string) => void,
     onBell: () => void,
     onKey?: (keyEvent: IKeyEvent) => void,
-    customKeyEventHandler?: (event: KeyboardEvent) => boolean
+    customKeyEventHandler?: (event: KeyboardEvent) => boolean,
+    getMode?: (mode: number) => boolean
   ) {
     this.encoder = ghostty.createKeyEncoder();
     this.container = container;
@@ -193,6 +196,7 @@ export class InputHandler {
     this.onBellCallback = onBell;
     this.onKeyCallback = onKey;
     this.customKeyEventHandler = customKeyEventHandler;
+    this.getModeCallback = getMode;
 
     // Attach event listeners
     this.attach();
@@ -347,19 +351,7 @@ export class InputHandler {
         case Key.ESCAPE:
           simpleOutput = '\x1B'; // ESC
           break;
-        // Arrow keys (CSI sequences)
-        case Key.UP:
-          simpleOutput = '\x1B[A';
-          break;
-        case Key.DOWN:
-          simpleOutput = '\x1B[B';
-          break;
-        case Key.RIGHT:
-          simpleOutput = '\x1B[C';
-          break;
-        case Key.LEFT:
-          simpleOutput = '\x1B[D';
-          break;
+        // Arrow keys are handled by the encoder (respects application cursor mode)
         // Navigation keys
         case Key.HOME:
           simpleOutput = '\x1B[H';
@@ -430,6 +422,13 @@ export class InputHandler {
 
     // For non-printable keys or keys with modifiers, encode using Ghostty
     try {
+      // Sync encoder options with terminal mode state
+      // Mode 1 (DECCKM) controls whether arrow keys send CSI or SS3 sequences
+      if (this.getModeCallback) {
+        const appCursorMode = this.getModeCallback(1);
+        this.encoder.setOption(KeyEncoderOption.CURSOR_KEY_APPLICATION, appCursorMode);
+      }
+
       // For letter/number keys, even with modifiers, pass the base character
       // This helps the encoder produce correct control sequences (e.g., Ctrl+A = 0x01)
       // For special keys (Enter, Arrow keys, etc.), don't pass utf8
