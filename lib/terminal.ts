@@ -118,6 +118,7 @@ export class Terminal implements ITerminalCore {
   private scrollAnimationStartY?: number;
   private scrollAnimationFrame?: number;
   private customWheelEventHandler?: (event: WheelEvent) => boolean;
+  private linkClickHandler?: (url: string, event: MouseEvent) => boolean;
   private lastCursorY: number = 0; // Track cursor position for onCursorMove
 
   // Scrollbar interaction state
@@ -135,6 +136,9 @@ export class Terminal implements ITerminalCore {
   constructor(options: ITerminalOptions = {}) {
     // Use provided Ghostty instance (for test isolation) or get module-level instance
     this.ghostty = options.ghostty ?? getGhostty();
+
+    // Store link click handler (for webview integration)
+    this.linkClickHandler = options.onLinkClick;
 
     // Create base options object with all defaults (excluding ghostty)
     const baseOptions = {
@@ -1484,8 +1488,17 @@ export class Terminal implements ITerminalCore {
     const link = await this.linkDetector.getLinkAt(x, bufferRow);
 
     if (link) {
-      // Activate link
-      link.activate(e);
+      // Use custom link handler if provided (for webview integration)
+      // If handler returns true, it handled the link; otherwise fall back to default
+      let handled = false;
+      if (this.linkClickHandler) {
+        handled = this.linkClickHandler(link.text, e);
+      }
+
+      if (!handled) {
+        // Default: use link's built-in activate method
+        link.activate(e);
+      }
 
       // Prevent default action if modifier key held
       if (e.ctrlKey || e.metaKey) {
