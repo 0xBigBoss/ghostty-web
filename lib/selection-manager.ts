@@ -205,23 +205,14 @@ export class SelectionManager {
 
   /**
    * Check if there's an active selection
-   * Note: Same-cell selection (start == end) during drag means no selection,
-   * but we allow it when selection was set programmatically (e.g., triple-click)
-   * by checking if we're currently dragging.
    */
   hasSelection(): boolean {
     if (!this.selectionStart || !this.selectionEnd) return false;
 
-    // If currently dragging (isSelecting), same-cell means no drag yet
-    // Otherwise (programmatic selection), same-cell is valid for single-char content
-    if (this.isSelecting) {
-      return !(
-        this.selectionStart.col === this.selectionEnd.col &&
-        this.selectionStart.absoluteRow === this.selectionEnd.absoluteRow
-      );
-    }
-
-    // For non-drag selections, coordinates exist means selection exists
+    // Same start and end means no real selection
+    // Note: click-without-drag clears same-cell in mouseup handler,
+    // so any same-cell selection here is programmatic (e.g., triple-click single-char)
+    // which IS a valid selection
     return true;
   }
 
@@ -543,6 +534,20 @@ export class SelectionManager {
       if (this.isSelecting) {
         this.isSelecting = false;
         this.stopAutoScroll();
+
+        // Check if this was a click without drag (start == end)
+        // If so, clear the selection - a click shouldn't create a selection
+        if (
+          this.selectionStart &&
+          this.selectionEnd &&
+          this.selectionStart.col === this.selectionEnd.col &&
+          this.selectionStart.absoluteRow === this.selectionEnd.absoluteRow
+        ) {
+          // Clear same-cell selection from click-without-drag
+          this.selectionStart = null;
+          this.selectionEnd = null;
+          return;
+        }
 
         const text = this.getSelection();
         if (text) {
