@@ -835,11 +835,13 @@ export class SelectionManager {
     const line = this.wasmTerm.getLine(row);
     if (!line) return null;
 
-    // Word characters: letters, numbers, underscore, dash
+    // Word characters: letters, numbers, and common path/URL characters
+    // Matches native Ghostty behavior where double-click selects entire paths
+    // Includes: / (path sep), . (extensions), ~ (home), : (line numbers), @ (emails)
     const isWordChar = (cell: GhosttyCell) => {
       if (!cell || cell.codepoint === 0) return false;
       const char = String.fromCodePoint(cell.codepoint);
-      return /[\w-]/.test(char);
+      return /[\w\-./~:@+]/.test(char);
     };
 
     // Only return if we're actually on a word character
