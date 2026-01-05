@@ -586,7 +586,17 @@ export class SelectionManager {
         const absoluteRow = this.viewportRowToAbsolute(cell.row);
 
         // Find actual line length (exclude trailing empty cells)
-        const line = this.wasmTerm.getLine(cell.row);
+        // Use scrollback-aware line retrieval (like getSelection does)
+        const scrollbackLength = this.wasmTerm.getScrollbackLength();
+        let line: GhosttyCell[] | null = null;
+        if (absoluteRow < scrollbackLength) {
+          // Row is in scrollback
+          line = this.wasmTerm.getScrollbackLine(absoluteRow);
+        } else {
+          // Row is in screen buffer
+          const screenRow = absoluteRow - scrollbackLength;
+          line = this.wasmTerm.getLine(screenRow);
+        }
         let endCol = 0;
         if (line) {
           for (let i = line.length - 1; i >= 0; i--) {
