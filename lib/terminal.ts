@@ -105,6 +105,7 @@ export class Terminal implements ITerminalCore {
   // Resize protection: queue writes during resize to prevent race conditions
   private _isResizing = false;
   private _writeQueue: Array<{ data: string | Uint8Array; callback?: () => void }> = [];
+  private _resizeFlushFrameId?: number;
 
   // Addons
   private addons: ITerminalAddon[] = [];
@@ -539,8 +540,10 @@ export class Terminal implements ITerminalCore {
 
     // Queue writes during resize to prevent WASM race conditions.
     // Writes will be flushed after resize completes.
+    // Copy Uint8Array data to prevent mutation by caller before flush.
     if (this._isResizing) {
-      this._writeQueue.push({ data, callback });
+      const dataCopy = data instanceof Uint8Array ? new Uint8Array(data) : data;
+      this._writeQueue.push({ data: dataCopy, callback });
       return;
     }
 
@@ -710,7 +713,9 @@ export class Terminal implements ITerminalCore {
 
     // Clear resizing flag and flush queued writes after a frame
     // This ensures WASM state has fully settled before processing writes
-    requestAnimationFrame(() => {
+    // Track the frame ID so it can be canceled on dispose
+    this._resizeFlushFrameId = requestAnimationFrame(() => {
+      this._resizeFlushFrameId = undefined;
       this._isResizing = false;
       this.flushWriteQueue();
     });
@@ -720,6 +725,11 @@ export class Terminal implements ITerminalCore {
    * Flush queued writes that were blocked during resize
    */
   private flushWriteQueue(): void {
+    // Guard against flush after dispose
+    if (this.isDisposed || !this.isOpen) {
+      this._writeQueue = [];
+      return;
+    }
     const queue = this._writeQueue;
     this._writeQueue = [];
     for (const { data, callback } of queue) {
@@ -1116,6 +1126,14 @@ export class Terminal implements ITerminalCore {
       cancelAnimationFrame(this.scrollAnimationFrame);
       this.scrollAnimationFrame = undefined;
     }
+
+    // Cancel pending resize flush and clear write queue
+    if (this._resizeFlushFrameId) {
+      cancelAnimationFrame(this._resizeFlushFrameId);
+      this._resizeFlushFrameId = undefined;
+    }
+    this._writeQueue = [];
+    this._isResizing = false;
 
     // Clear mouse move throttle timeout
     if (this.mouseMoveThrottleTimeout) {
