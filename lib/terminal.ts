@@ -644,6 +644,10 @@ export class Terminal implements ITerminalCore {
 
   /**
    * Resize terminal
+   *
+   * Note: We pause the render loop during resize to prevent a race condition.
+   * The WASM terminal reallocates internal buffers during resize, and if the
+   * render loop reads from those buffers concurrently, it can cause a crash.
    */
   resize(cols: number, rows: number): void {
     this.assertOpen();
@@ -652,11 +656,20 @@ export class Terminal implements ITerminalCore {
       return; // No change
     }
 
+    // Pause render loop during resize to prevent race condition.
+    // The render loop reads from WASM buffers that are reallocated during resize.
+    // Without this, concurrent access can cause SIGSEGV crashes.
+    const wasRunning = this.animationFrameId !== undefined;
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = undefined;
+    }
+
     // Update dimensions
     this.cols = cols;
     this.rows = rows;
 
-    // Resize WASM terminal
+    // Resize WASM terminal (this reallocates internal buffers)
     this.wasmTerm!.resize(cols, rows);
 
     // Resize renderer
@@ -672,8 +685,13 @@ export class Terminal implements ITerminalCore {
     // Fire resize event
     this.resizeEmitter.fire({ cols, rows });
 
-    // Force full render
+    // Force full render with new dimensions
     this.renderer!.render(this.wasmTerm!, true, this.viewportY, this);
+
+    // Restart render loop if it was running
+    if (wasRunning) {
+      this.startRenderLoop();
+    }
   }
 
   /**
