@@ -689,13 +689,13 @@ export class Terminal implements ITerminalCore {
       this.animationFrameId = undefined;
     }
 
-    // Update dimensions
-    this.cols = cols;
-    this.rows = rows;
-
     try {
       // Resize WASM terminal (this reallocates internal buffers)
       this.wasmTerm!.resize(cols, rows);
+
+      // Update dimensions after successful WASM resize
+      this.cols = cols;
+      this.rows = rows;
 
       // Resize renderer
       this.renderer!.resize(cols, rows);
