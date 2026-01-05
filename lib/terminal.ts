@@ -671,6 +671,12 @@ export class Terminal implements ITerminalCore {
       return; // No change
     }
 
+    // Cancel any pending resize flush from a previous resize - this resize supersedes it
+    if (this._resizeFlushFrameId) {
+      cancelAnimationFrame(this._resizeFlushFrameId);
+      this._resizeFlushFrameId = undefined;
+    }
+
     // Set resizing flag to queue any incoming writes
     this._isResizing = true;
 
@@ -687,24 +693,29 @@ export class Terminal implements ITerminalCore {
     this.cols = cols;
     this.rows = rows;
 
-    // Resize WASM terminal (this reallocates internal buffers)
-    this.wasmTerm!.resize(cols, rows);
+    try {
+      // Resize WASM terminal (this reallocates internal buffers)
+      this.wasmTerm!.resize(cols, rows);
 
-    // Resize renderer
-    this.renderer!.resize(cols, rows);
+      // Resize renderer
+      this.renderer!.resize(cols, rows);
 
-    // Update canvas dimensions
-    const metrics = this.renderer!.getMetrics();
-    this.canvas!.width = metrics.width * cols;
-    this.canvas!.height = metrics.height * rows;
-    this.canvas!.style.width = `${metrics.width * cols}px`;
-    this.canvas!.style.height = `${metrics.height * rows}px`;
+      // Update canvas dimensions
+      const metrics = this.renderer!.getMetrics();
+      this.canvas!.width = metrics.width * cols;
+      this.canvas!.height = metrics.height * rows;
+      this.canvas!.style.width = `${metrics.width * cols}px`;
+      this.canvas!.style.height = `${metrics.height * rows}px`;
 
-    // Fire resize event
-    this.resizeEmitter.fire({ cols, rows });
+      // Fire resize event
+      this.resizeEmitter.fire({ cols, rows });
 
-    // Force full render with new dimensions
-    this.renderer!.render(this.wasmTerm!, true, this.viewportY, this);
+      // Force full render with new dimensions
+      this.renderer!.render(this.wasmTerm!, true, this.viewportY, this);
+    } catch (err) {
+      console.error('[ghostty-web] Resize error:', err);
+      // Still clear the flag so future resizes can proceed
+    }
 
     // Restart render loop if it was running
     if (wasRunning) {
