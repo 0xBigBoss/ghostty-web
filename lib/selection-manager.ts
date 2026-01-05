@@ -566,14 +566,25 @@ export class SelectionManager {
           }
         }
       } else if (e.detail >= 3) {
-        // Triple-click (or more) - select entire line
+        // Triple-click (or more) - select line content (like native Ghostty)
         const cell = this.pixelToCell(e.offsetX, e.offsetY);
-        const dims = this.wasmTerm.getDimensions();
         const absoluteRow = this.viewportRowToAbsolute(cell.row);
 
-        // Select entire line
+        // Find actual line length (exclude trailing empty cells)
+        const line = this.wasmTerm.getLine(cell.row);
+        let endCol = 0;
+        if (line) {
+          for (let i = line.length - 1; i >= 0; i--) {
+            if (line[i] && line[i].codepoint !== 0 && line[i].codepoint !== 32) {
+              endCol = i;
+              break;
+            }
+          }
+        }
+
+        // Select line content only (not trailing whitespace)
         this.selectionStart = { col: 0, absoluteRow };
-        this.selectionEnd = { col: dims.cols - 1, absoluteRow };
+        this.selectionEnd = { col: endCol, absoluteRow };
         this.requestRender();
 
         const text = this.getSelection();
