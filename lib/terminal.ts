@@ -102,6 +102,10 @@ export class Terminal implements ITerminalCore {
   private isDisposed = false;
   private animationFrameId?: number;
 
+  // Resize protection: queue writes during resize to prevent race conditions
+  private _isResizing = false;
+  private _writeQueue: Array<{ data: string | Uint8Array; callback?: () => void }> = [];
+
   // Addons
   private addons: ITerminalAddon[] = [];
 
@@ -533,6 +537,13 @@ export class Terminal implements ITerminalCore {
       data = data.replace(/\n/g, '\r\n');
     }
 
+    // Queue writes during resize to prevent WASM race conditions.
+    // Writes will be flushed after resize completes.
+    if (this._isResizing) {
+      this._writeQueue.push({ data, callback });
+      return;
+    }
+
     this.writeInternal(data, callback);
   }
 
@@ -645,9 +656,10 @@ export class Terminal implements ITerminalCore {
   /**
    * Resize terminal
    *
-   * Note: We pause the render loop during resize to prevent a race condition.
-   * The WASM terminal reallocates internal buffers during resize, and if the
-   * render loop reads from those buffers concurrently, it can cause a crash.
+   * Note: We pause the render loop and queue writes during resize to prevent
+   * race conditions. The WASM terminal reallocates internal buffers during
+   * resize, and if the render loop or writes access those buffers concurrently,
+   * it can cause a crash.
    */
   resize(cols: number, rows: number): void {
     this.assertOpen();
@@ -655,6 +667,9 @@ export class Terminal implements ITerminalCore {
     if (cols === this.cols && rows === this.rows) {
       return; // No change
     }
+
+    // Set resizing flag to queue any incoming writes
+    this._isResizing = true;
 
     // Pause render loop during resize to prevent race condition.
     // The render loop reads from WASM buffers that are reallocated during resize.
@@ -691,6 +706,24 @@ export class Terminal implements ITerminalCore {
     // Restart render loop if it was running
     if (wasRunning) {
       this.startRenderLoop();
+    }
+
+    // Clear resizing flag and flush queued writes after a frame
+    // This ensures WASM state has fully settled before processing writes
+    requestAnimationFrame(() => {
+      this._isResizing = false;
+      this.flushWriteQueue();
+    });
+  }
+
+  /**
+   * Flush queued writes that were blocked during resize
+   */
+  private flushWriteQueue(): void {
+    const queue = this._writeQueue;
+    this._writeQueue = [];
+    for (const { data, callback } of queue) {
+      this.writeInternal(data, callback);
     }
   }
 
