@@ -12,3 +12,9 @@ AGENTS.md
 run-demo.sh
 vite.config.js
 tsconfig.json
+biome.json
+.prettierrc
+.prettierignore
+
+# Exclude ghostty submodule (large, not needed at runtime)
+ghostty/
