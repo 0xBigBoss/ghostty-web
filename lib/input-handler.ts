@@ -183,6 +183,8 @@ export class InputHandler {
   private getModeCallback?: (mode: number) => boolean;
   private onCopyCallback?: () => boolean;
   private mouseConfig?: MouseTrackingConfig;
+  private macOptionIsMeta: boolean;
+  private isMac: boolean;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
   private keypressListener: ((e: KeyboardEvent) => void) | null = null;
   private pasteListener: ((e: ClipboardEvent) => void) | null = null;
@@ -220,6 +222,7 @@ export class InputHandler {
    * @param onCopy - Optional callback to handle copy (Cmd+C/Ctrl+C with selection)
    * @param inputElement - Optional input element for beforeinput events
    * @param mouseConfig - Optional mouse tracking configuration
+   * @param macOptionIsMeta - Treat Option key as Meta on Mac (sends ESC prefix)
    */
   constructor(
     ghostty: Ghostty,
@@ -231,7 +234,8 @@ export class InputHandler {
     getMode?: (mode: number) => boolean,
     onCopy?: () => boolean,
     inputElement?: HTMLElement,
-    mouseConfig?: MouseTrackingConfig
+    mouseConfig?: MouseTrackingConfig,
+    macOptionIsMeta?: boolean
   ) {
     this.encoder = ghostty.createKeyEncoder();
     this.container = container;
@@ -243,6 +247,10 @@ export class InputHandler {
     this.getModeCallback = getMode;
     this.onCopyCallback = onCopy;
     this.mouseConfig = mouseConfig;
+    this.macOptionIsMeta = macOptionIsMeta ?? false;
+    // Detect Mac platform
+    this.isMac =
+      typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 
     // Attach event listeners
     this.attach();
@@ -419,6 +427,15 @@ export class InputHandler {
       return;
     }
 
+    // Handle macOptionIsMeta: on Mac, treat Option key as Meta (send ESC prefix)
+    // This enables word navigation (Option+Left/Right) and other Meta shortcuts
+    if (this.isMac && this.macOptionIsMeta && event.altKey && !event.ctrlKey && !event.metaKey) {
+      const handled = this.handleOptionAsMeta(event);
+      if (handled) {
+        return;
+      }
+    }
+
     // For printable characters without modifiers, send the character directly
     // This handles: a-z, A-Z (with shift), 0-9, punctuation, etc.
     if (this.isPrintableCharacter(event)) {
@@ -570,6 +587,62 @@ export class InputHandler {
       // Encoding failed - log but don't crash
       console.warn('Failed to encode key:', event.code, error);
     }
+  }
+
+  /**
+   * Handle Option key as Meta on Mac (sends ESC prefix)
+   * This enables word navigation shortcuts like Option+Left/Right
+   * @param event - KeyboardEvent with altKey pressed
+   * @returns true if the event was handled
+   */
+  private handleOptionAsMeta(event: KeyboardEvent): boolean {
+    let output: string | null = null;
+
+    // Handle arrow keys with Option -> send Meta-modified sequences
+    // These are the standard readline/bash word navigation keys
+    switch (event.code) {
+      case 'ArrowLeft':
+        // Option+Left -> ESC b (backward-word)
+        output = '\x1bb';
+        break;
+      case 'ArrowRight':
+        // Option+Right -> ESC f (forward-word)
+        output = '\x1bf';
+        break;
+      case 'ArrowUp':
+        // Option+Up -> ESC [ 1 ; 3 A (Meta-Up)
+        output = '\x1b[1;3A';
+        break;
+      case 'ArrowDown':
+        // Option+Down -> ESC [ 1 ; 3 B (Meta-Down)
+        output = '\x1b[1;3B';
+        break;
+      case 'Backspace':
+        // Option+Backspace -> ESC DEL (backward-kill-word)
+        output = '\x1b\x7f';
+        break;
+      case 'Delete':
+        // Option+Delete -> ESC d (kill-word)
+        output = '\x1bd';
+        break;
+      default:
+        // For letter keys, send ESC + letter (Meta prefix)
+        if (event.key.length === 1) {
+          const char = event.shiftKey ? event.key : event.key.toLowerCase();
+          output = '\x1b' + char;
+        }
+        break;
+    }
+
+    if (output !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.onDataCallback(output);
+      this.recordKeyDownData(output);
+      return true;
+    }
+
+    return false;
   }
 
   /**

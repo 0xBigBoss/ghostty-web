@@ -1192,4 +1192,245 @@ describe('InputHandler', () => {
       expect(dataReceived.length).toBe(0);
     });
   });
+
+  describe('macOptionIsMeta', () => {
+    test('Option+Left sends ESC b when macOptionIsMeta is true', () => {
+      const handler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {
+          bellCalled = true;
+        },
+        undefined, // onKey
+        undefined, // customKeyEventHandler
+        undefined, // getMode
+        undefined, // onCopy
+        undefined, // inputElement
+        undefined, // mouseConfig
+        true // macOptionIsMeta
+      );
+
+      // Mock navigator.platform to be Mac
+      const originalNavigator = globalThis.navigator;
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { platform: 'MacIntel' },
+        writable: true,
+      });
+
+      // Recreate handler with Mac platform detection
+      const macHandler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {
+          bellCalled = true;
+        },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true
+      );
+
+      const event = createKeyEvent('ArrowLeft', 'ArrowLeft', { alt: true });
+      simulateKey(container, event);
+
+      // Should send ESC b (backward-word)
+      expect(dataReceived).toContain('\x1bb');
+
+      // Restore navigator
+      Object.defineProperty(globalThis, 'navigator', {
+        value: originalNavigator,
+        writable: true,
+      });
+    });
+
+    test('Option+Right sends ESC f when macOptionIsMeta is true', () => {
+      // Mock navigator.platform to be Mac
+      const originalNavigator = globalThis.navigator;
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { platform: 'MacIntel' },
+        writable: true,
+      });
+
+      const handler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {
+          bellCalled = true;
+        },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true
+      );
+
+      const event = createKeyEvent('ArrowRight', 'ArrowRight', { alt: true });
+      simulateKey(container, event);
+
+      // Should send ESC f (forward-word)
+      expect(dataReceived).toContain('\x1bf');
+
+      // Restore navigator
+      Object.defineProperty(globalThis, 'navigator', {
+        value: originalNavigator,
+        writable: true,
+      });
+    });
+
+    test('Option+Backspace sends ESC DEL when macOptionIsMeta is true', () => {
+      // Mock navigator.platform to be Mac
+      const originalNavigator = globalThis.navigator;
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { platform: 'MacIntel' },
+        writable: true,
+      });
+
+      const handler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {
+          bellCalled = true;
+        },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true
+      );
+
+      const event = createKeyEvent('Backspace', 'Backspace', { alt: true });
+      simulateKey(container, event);
+
+      // Should send ESC DEL (backward-kill-word)
+      expect(dataReceived).toContain('\x1b\x7f');
+
+      // Restore navigator
+      Object.defineProperty(globalThis, 'navigator', {
+        value: originalNavigator,
+        writable: true,
+      });
+    });
+
+    test('Option+letter sends ESC + letter when macOptionIsMeta is true', () => {
+      // Mock navigator.platform to be Mac
+      const originalNavigator = globalThis.navigator;
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { platform: 'MacIntel' },
+        writable: true,
+      });
+
+      const handler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {
+          bellCalled = true;
+        },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true
+      );
+
+      const event = createKeyEvent('KeyD', 'd', { alt: true });
+      simulateKey(container, event);
+
+      // Should send ESC d (kill-word in bash)
+      expect(dataReceived).toContain('\x1bd');
+
+      // Restore navigator
+      Object.defineProperty(globalThis, 'navigator', {
+        value: originalNavigator,
+        writable: true,
+      });
+    });
+
+    test('Option+key does NOT send ESC sequence when macOptionIsMeta is false', () => {
+      // Mock navigator.platform to be Mac
+      const originalNavigator = globalThis.navigator;
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { platform: 'MacIntel' },
+        writable: true,
+      });
+
+      const handler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {
+          bellCalled = true;
+        },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false // macOptionIsMeta disabled
+      );
+
+      const event = createKeyEvent('ArrowLeft', 'ArrowLeft', { alt: true });
+      simulateKey(container, event);
+
+      // Should NOT send ESC b when macOptionIsMeta is false
+      expect(dataReceived).not.toContain('\x1bb');
+
+      // Restore navigator
+      Object.defineProperty(globalThis, 'navigator', {
+        value: originalNavigator,
+        writable: true,
+      });
+    });
+
+    test('Option+key does NOT send ESC sequence on non-Mac platforms', () => {
+      // Mock navigator.platform to be Windows
+      const originalNavigator = globalThis.navigator;
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { platform: 'Win32' },
+        writable: true,
+      });
+
+      const handler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {
+          bellCalled = true;
+        },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true // macOptionIsMeta enabled, but not on Mac
+      );
+
+      const event = createKeyEvent('ArrowLeft', 'ArrowLeft', { alt: true });
+      simulateKey(container, event);
+
+      // Should NOT send ESC b on non-Mac platforms
+      expect(dataReceived).not.toContain('\x1bb');
+
+      // Restore navigator
+      Object.defineProperty(globalThis, 'navigator', {
+        value: originalNavigator,
+        writable: true,
+      });
+    });
+  });
 });

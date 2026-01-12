@@ -22,6 +22,9 @@ export interface ITerminalOptions {
   // Scrolling options
   smoothScrollDuration?: number; // Duration in ms for smooth scroll animation (default: 100, 0 = instant)
 
+  // macOS-specific options
+  macOptionIsMeta?: boolean; // Treat Option key as Meta (sends ESC prefix) instead of producing special characters (default: false)
+
   // Link handling
   // Called when a link is clicked. Return true to prevent default link handling.
   // If not provided, links will use window.open() which may be blocked in webviews.
