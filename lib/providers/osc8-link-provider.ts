@@ -10,7 +10,7 @@
  * so we just need to scan for contiguous regions with the same ID.
  */
 
-import type { IBufferRange, ILink, ILinkProvider } from '../types';
+import type { IBufferRange, ILink, ILinkProvider } from "../types";
 
 /**
  * OSC 8 Hyperlink Provider
@@ -64,7 +64,7 @@ export class OSC8LinkProvider implements ILinkProvider {
           activate: (event) => {
             // Open link if Ctrl/Cmd is pressed
             if (event.ctrlKey || event.metaKey) {
-              window.open(uri, '_blank', 'noopener,noreferrer');
+              window.open(uri, "_blank", "noopener,noreferrer");
             }
           },
         });

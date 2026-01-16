@@ -4,7 +4,7 @@
  * Main entry point following xterm.js conventions
  */
 
-import { Ghostty } from './ghostty';
+import { Ghostty } from "./ghostty";
 
 // Module-level Ghostty instance (initialized by init())
 let ghosttyInstance: Ghostty | null = null;
@@ -40,22 +40,22 @@ export async function init(): Promise<void> {
 export function getGhostty(): Ghostty {
   if (!ghosttyInstance) {
     throw new Error(
-      'ghostty-web not initialized. Call init() before creating Terminal instances.\n' +
-        'Example:\n' +
+      "ghostty-web not initialized. Call init() before creating Terminal instances.\n" +
+        "Example:\n" +
         '  import { init, Terminal } from "ghostty-web";\n' +
-        '  await init();\n' +
-        '  const term = new Terminal();\n\n' +
-        'For tests, pass a Ghostty instance directly:\n' +
+        "  await init();\n" +
+        "  const term = new Terminal();\n\n" +
+        "For tests, pass a Ghostty instance directly:\n" +
         '  import { Ghostty, Terminal } from "ghostty-web";\n' +
-        '  const ghostty = await Ghostty.load();\n' +
-        '  const term = new Terminal({ ghostty });'
+        "  const ghostty = await Ghostty.load();\n" +
+        "  const term = new Terminal({ ghostty });",
     );
   }
   return ghosttyInstance;
 }
 
 // Main Terminal class
-export { Terminal } from './terminal';
+export { Terminal } from "./terminal";
 
 // xterm.js-compatible interfaces
 export type {
@@ -68,10 +68,10 @@ export type {
   IBufferRange,
   IKeyEvent,
   IUnicodeVersionProvider,
-} from './interfaces';
+} from "./interfaces";
 
 // Ghostty WASM components (for advanced usage)
-export { Ghostty, GhosttyTerminal, KeyEncoder, CellFlags, KeyEncoderOption } from './ghostty';
+export { Ghostty, GhosttyTerminal, KeyEncoder, CellFlags, KeyEncoderOption } from "./ghostty";
 export type {
   KeyEvent,
   KeyAction,
@@ -81,22 +81,32 @@ export type {
   RGB,
   Cursor,
   TerminalHandle,
-} from './types';
+} from "./types";
 
 // Low-level components (for custom integrations)
-export { CanvasRenderer } from './renderer';
-export type { RendererOptions, FontMetrics, IRenderable } from './renderer';
-export { InputHandler } from './input-handler';
-export { EventEmitter } from './event-emitter';
-export { SelectionManager } from './selection-manager';
-export type { SelectionCoordinates } from './selection-manager';
+export { CanvasRenderer } from "./renderer";
+export type { RendererOptions, FontMetrics } from "./renderer";
+export type {
+  CellMetrics,
+  CursorStyle,
+  HyperlinkRange,
+  LinkRange,
+  RenderInput,
+  Renderer,
+  SelectionRange,
+  TerminalTheme,
+} from "./renderer-types";
+export { InputHandler } from "./input-handler";
+export { EventEmitter } from "./event-emitter";
+export { SelectionManager } from "./selection-manager";
+export type { SelectionCoordinates } from "./selection-manager";
 
 // Addons
-export { FitAddon } from './addons/fit';
-export type { ITerminalDimensions } from './addons/fit';
+export { FitAddon } from "./addons/fit";
+export type { ITerminalDimensions } from "./addons/fit";
 
 // Link providers
-export { OSC8LinkProvider } from './providers/osc8-link-provider';
-export { UrlRegexProvider } from './providers/url-regex-provider';
-export { LinkDetector } from './link-detector';
-export type { ILink, ILinkProvider, IBufferCellPosition } from './types';
+export { OSC8LinkProvider } from "./providers/osc8-link-provider";
+export { UrlRegexProvider } from "./providers/url-regex-provider";
+export { LinkDetector } from "./link-detector";
+export type { ILink, ILinkProvider, IBufferCellPosition } from "./types";

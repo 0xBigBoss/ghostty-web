@@ -13,7 +13,7 @@
  * ```
  */
 
-import type { ITerminalAddon, ITerminalCore } from '../interfaces';
+import type { ITerminalAddon, ITerminalCore } from "../interfaces";
 
 // ============================================================================
 // Constants
@@ -115,7 +115,7 @@ export class FitAddon implements ITerminalAddon {
 
     try {
       // Resize terminal
-      if (terminal.resize && typeof terminal.resize === 'function') {
+      if (terminal.resize && typeof terminal.resize === "function") {
         terminal.resize(dims.cols, dims.rows);
       }
     } finally {
@@ -147,7 +147,7 @@ export class FitAddon implements ITerminalAddon {
     const terminal = this._terminal as any;
     const renderer = terminal.renderer;
 
-    if (!renderer || typeof renderer.getMetrics !== 'function') {
+    if (!renderer || typeof renderer.getMetrics !== "function") {
       return undefined;
     }
 
@@ -162,17 +162,17 @@ export class FitAddon implements ITerminalAddon {
     const terminalElement = this._terminal.element;
 
     // Check if we have clientWidth/clientHeight (DOM element required)
-    if (typeof terminalElement.clientWidth === 'undefined') {
+    if (typeof terminalElement.clientWidth === "undefined") {
       return undefined;
     }
 
     const elementStyle = window.getComputedStyle(terminalElement);
 
     // Get the actual content area (inside padding)
-    const paddingTop = Number.parseInt(elementStyle.getPropertyValue('padding-top')) || 0;
-    const paddingBottom = Number.parseInt(elementStyle.getPropertyValue('padding-bottom')) || 0;
-    const paddingLeft = Number.parseInt(elementStyle.getPropertyValue('padding-left')) || 0;
-    const paddingRight = Number.parseInt(elementStyle.getPropertyValue('padding-right')) || 0;
+    const paddingTop = Number.parseInt(elementStyle.getPropertyValue("padding-top")) || 0;
+    const paddingBottom = Number.parseInt(elementStyle.getPropertyValue("padding-bottom")) || 0;
+    const paddingLeft = Number.parseInt(elementStyle.getPropertyValue("padding-left")) || 0;
+    const paddingRight = Number.parseInt(elementStyle.getPropertyValue("padding-right")) || 0;
 
     // Use clientWidth/clientHeight which gives us the inside dimensions
     // This is stable and doesn't grow with content

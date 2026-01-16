@@ -3,9 +3,9 @@ name: publish
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_run:
-    workflows: ['ci']
+    workflows: ["ci"]
     types:
       - completed
     branches:
@@ -63,8 +63,8 @@ jobs:
       - name: Setup Node.js for npm
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
 
       # Ensure npm 11.5.1 or later for trusted publishing
       - run: npm install -g npm@latest
@@ -167,8 +167,8 @@ jobs:
       - name: Setup Node.js for npm
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
 
       - run: npm install -g npm@latest
 

@@ -2,18 +2,20 @@
  * xterm.js-compatible interfaces
  */
 
-import type { Ghostty } from './ghostty';
+import type { Ghostty } from "./ghostty";
+import type { Renderer } from "./renderer-types";
 
 export interface ITerminalOptions {
   cols?: number; // Default: 80
   rows?: number; // Default: 24
   cursorBlink?: boolean; // Default: false
-  cursorStyle?: 'block' | 'underline' | 'bar';
+  cursorStyle?: "block" | "underline" | "bar";
   theme?: ITheme;
   scrollback?: number; // Default: 1000
   fontSize?: number; // Default: 15
   fontFamily?: string; // Default: 'monospace'
   allowTransparency?: boolean;
+  renderer?: Renderer;
 
   // Phase 1 additions
   convertEol?: boolean; // Convert \n to \r\n (default: false)
@@ -39,6 +41,7 @@ export interface ITheme {
   cursorAccent?: string;
   selectionBackground?: string;
   selectionForeground?: string;
+  selectionOpacity?: number;
 
   // ANSI colors (0-15)
   black?: string;
@@ -125,7 +128,7 @@ export interface IBufferNamespace {
  */
 export interface IBuffer {
   /** Buffer type: 'normal' or 'alternate' */
-  readonly type: 'normal' | 'alternate';
+  readonly type: "normal" | "alternate";
   /** Cursor X position (0-indexed) */
   readonly cursorX: number;
   /** Cursor Y position (0-indexed, relative to viewport) */

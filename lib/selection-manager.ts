@@ -6,16 +6,16 @@
  * - Double-click word selection
  * - Text extraction from terminal buffer
  * - Automatic clipboard copy
- * - Visual selection highlighting (integrated into CanvasRenderer cell rendering)
+ * - Visual selection highlighting (integrated into renderer cell rendering)
  * - Auto-scroll during drag selection
  */
 
-import { EventEmitter } from './event-emitter';
-import type { GhosttyTerminal } from './ghostty';
-import type { IEvent } from './interfaces';
-import type { CanvasRenderer } from './renderer';
-import type { Terminal } from './terminal';
-import type { GhosttyCell } from './types';
+import { EventEmitter } from "./event-emitter";
+import type { GhosttyTerminal } from "./ghostty";
+import type { IEvent } from "./interfaces";
+import type { Renderer } from "./renderer-types";
+import type { Terminal } from "./terminal";
+import type { GhosttyCell } from "./types";
 
 // ============================================================================
 // Type Definitions
@@ -34,7 +34,7 @@ export interface SelectionCoordinates {
 
 export class SelectionManager {
   private terminal: Terminal;
-  private renderer: CanvasRenderer;
+  private renderer: Renderer;
   private wasmTerm: GhosttyTerminal;
   private textarea: HTMLTextAreaElement;
 
@@ -73,7 +73,7 @@ export class SelectionManager {
    */
   private getViewportY(): number {
     const rawViewportY =
-      typeof (this.terminal as any).getViewportY === 'function'
+      typeof (this.terminal as any).getViewportY === "function"
         ? (this.terminal as any).getViewportY()
         : (this.terminal as any).viewportY || 0;
     return Math.max(0, Math.floor(rawViewportY));
@@ -102,9 +102,9 @@ export class SelectionManager {
 
   constructor(
     terminal: Terminal,
-    renderer: CanvasRenderer,
+    renderer: Renderer,
     wasmTerm: GhosttyTerminal,
-    textarea: HTMLTextAreaElement
+    textarea: HTMLTextAreaElement,
   ) {
     this.terminal = terminal;
     this.renderer = renderer;
@@ -123,7 +123,7 @@ export class SelectionManager {
    * Get the selected text as a string
    */
   getSelection(): string {
-    if (!this.selectionStart || !this.selectionEnd) return '';
+    if (!this.selectionStart || !this.selectionEnd) return "";
 
     // Get absolute row coordinates (not clamped to viewport)
     let { col: startCol, absoluteRow: startAbsRow } = this.selectionStart;
@@ -136,7 +136,7 @@ export class SelectionManager {
     }
 
     const scrollbackLength = this.wasmTerm.getScrollbackLength();
-    let text = '';
+    let text = "";
 
     for (let absRow = startAbsRow; absRow <= endAbsRow; absRow++) {
       // Fetch line based on absolute row position
@@ -163,7 +163,7 @@ export class SelectionManager {
       const colEnd = absRow === endAbsRow ? endCol : line.length - 1;
 
       // Build the line text
-      let lineText = '';
+      let lineText = "";
       for (let col = colStart; col <= colEnd; col++) {
         const cell = line[col];
         if (cell && cell.codepoint !== 0) {
@@ -185,7 +185,7 @@ export class SelectionManager {
             lastNonEmpty = lineText.length;
           }
         } else {
-          lineText += ' ';
+          lineText += " ";
         }
       }
 
@@ -193,14 +193,14 @@ export class SelectionManager {
       if (lastNonEmpty >= 0) {
         lineText = lineText.substring(0, lastNonEmpty);
       } else {
-        lineText = '';
+        lineText = "";
       }
 
       text += lineText;
 
       // Add newline between rows (but not after the last row)
       if (absRow < endAbsRow) {
-        text += '\n';
+        text += "\n";
       }
     }
 
@@ -383,26 +383,26 @@ export class SelectionManager {
 
     // Clean up document event listener
     if (this.boundMouseUpHandler) {
-      document.removeEventListener('mouseup', this.boundMouseUpHandler);
+      document.removeEventListener("mouseup", this.boundMouseUpHandler);
       this.boundMouseUpHandler = null;
     }
 
     // Clean up document mousemove listener
     if (this.boundDocumentMouseMoveHandler) {
-      document.removeEventListener('mousemove', this.boundDocumentMouseMoveHandler);
+      document.removeEventListener("mousemove", this.boundDocumentMouseMoveHandler);
       this.boundDocumentMouseMoveHandler = null;
     }
 
     // Clean up context menu event listener
     if (this.boundContextMenuHandler) {
       const canvas = this.renderer.getCanvas();
-      canvas.removeEventListener('contextmenu', this.boundContextMenuHandler);
+      canvas.removeEventListener("contextmenu", this.boundContextMenuHandler);
       this.boundContextMenuHandler = null;
     }
 
     // Clean up document click listener
     if (this.boundClickHandler) {
-      document.removeEventListener('click', this.boundClickHandler);
+      document.removeEventListener("click", this.boundClickHandler);
       this.boundClickHandler = null;
     }
 
@@ -487,7 +487,7 @@ export class SelectionManager {
     button: number,
     isRelease: boolean,
     modifiers: number = 0,
-    isMotion: boolean = false
+    isMotion: boolean = false,
   ): void {
     // Only emit SGR sequences if mode 1006 is enabled
     // Without 1006, apps expect X10 format (not yet implemented)
@@ -510,7 +510,7 @@ export class SelectionManager {
     buttonCode += modifiers;
 
     // SGR format: \x1b[<buttonCode;x;yM (press) or \x1b[<buttonCode;x;ym (release)
-    const suffix = isRelease ? 'm' : 'M';
+    const suffix = isRelease ? "m" : "M";
     const sequence = `\x1b[<${buttonCode};${x};${y}${suffix}`;
 
     // Send via terminal's data emitter (goes to PTY)
@@ -533,7 +533,7 @@ export class SelectionManager {
     const canvas = this.renderer.getCanvas();
 
     // Mouse down - start selection or send mouse event to application
-    canvas.addEventListener('mousedown', (e: MouseEvent) => {
+    canvas.addEventListener("mousedown", (e: MouseEvent) => {
       // CRITICAL: Focus the terminal so it can receive keyboard input
       // The canvas doesn't have tabindex, but the parent container does
       if (canvas.parentElement) {
@@ -573,7 +573,7 @@ export class SelectionManager {
     });
 
     // Mouse move on canvas - update selection or send motion events
-    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+    canvas.addEventListener("mousemove", (e: MouseEvent) => {
       // Check if motion events should be reported based on tracking mode
       if (this.terminal.hasMouseTracking()) {
         const buttonHeld = this.mouseButtonsPressed.size > 0;
@@ -605,7 +605,7 @@ export class SelectionManager {
     });
 
     // Mouse leave - check for auto-scroll when leaving canvas during drag
-    canvas.addEventListener('mouseleave', (e: MouseEvent) => {
+    canvas.addEventListener("mouseleave", (e: MouseEvent) => {
       if (this.isSelecting) {
         // Determine scroll direction based on where mouse left
         const rect = canvas.getBoundingClientRect();
@@ -618,7 +618,7 @@ export class SelectionManager {
     });
 
     // Mouse enter - stop auto-scroll when mouse returns to canvas
-    canvas.addEventListener('mouseenter', () => {
+    canvas.addEventListener("mouseenter", () => {
       if (this.isSelecting) {
         this.stopAutoScroll();
       }
@@ -667,10 +667,10 @@ export class SelectionManager {
         }
       }
     };
-    document.addEventListener('mousemove', this.boundDocumentMouseMoveHandler);
+    document.addEventListener("mousemove", this.boundDocumentMouseMoveHandler);
 
     // Track mousedown on document to know if a click started inside the canvas
-    document.addEventListener('mousedown', (e: MouseEvent) => {
+    document.addEventListener("mousedown", (e: MouseEvent) => {
       this.mouseDownTarget = e.target;
     });
 
@@ -680,7 +680,11 @@ export class SelectionManager {
       // Handle mouse release for mouse tracking
       // Use e.button directly to handle multi-button scenarios correctly
       const sgrButton = this.mapButton(e.button);
-      if (sgrButton !== null && this.mouseButtonsPressed.has(sgrButton) && this.terminal.hasMouseTracking()) {
+      if (
+        sgrButton !== null &&
+        this.mouseButtonsPressed.has(sgrButton) &&
+        this.terminal.hasMouseTracking()
+      ) {
         const rect = canvas.getBoundingClientRect();
         // Calculate cell from event position (clamped to canvas bounds)
         const clampedX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
@@ -721,11 +725,11 @@ export class SelectionManager {
         }
       }
     };
-    document.addEventListener('mouseup', this.boundMouseUpHandler);
+    document.addEventListener("mouseup", this.boundMouseUpHandler);
 
     // Handle click events for double-click (word) and triple-click (line) selection
     // Use event.detail which browsers set to click count (1, 2, 3, etc.)
-    canvas.addEventListener('click', (e: MouseEvent) => {
+    canvas.addEventListener("click", (e: MouseEvent) => {
       // event.detail: 1 = single, 2 = double, 3 = triple click
       if (e.detail === 2) {
         // Double-click - select word
@@ -801,16 +805,16 @@ export class SelectionManager {
       const canvas = this.renderer.getCanvas();
       const rect = canvas.getBoundingClientRect();
 
-      this.textarea.style.position = 'fixed';
+      this.textarea.style.position = "fixed";
       this.textarea.style.left = `${e.clientX}px`;
       this.textarea.style.top = `${e.clientY}px`;
-      this.textarea.style.width = '1px';
-      this.textarea.style.height = '1px';
-      this.textarea.style.zIndex = '1000';
-      this.textarea.style.opacity = '0';
+      this.textarea.style.width = "1px";
+      this.textarea.style.height = "1px";
+      this.textarea.style.zIndex = "1000";
+      this.textarea.style.opacity = "0";
 
       // Enable pointer events temporarily so context menu targets the textarea
-      this.textarea.style.pointerEvents = 'auto';
+      this.textarea.style.pointerEvents = "auto";
 
       // If there's a selection, populate textarea with it and select the text
       if (this.hasSelection()) {
@@ -820,7 +824,7 @@ export class SelectionManager {
         this.textarea.setSelectionRange(0, text.length);
       } else {
         // No selection - clear textarea but still show menu (for paste)
-        this.textarea.value = '';
+        this.textarea.value = "";
       }
 
       // Focus the textarea so the context menu appears on it
@@ -831,30 +835,30 @@ export class SelectionManager {
       setTimeout(() => {
         // Listen for when the context menu closes (user clicks away or selects an option)
         const resetTextarea = () => {
-          this.textarea.style.pointerEvents = 'none';
-          this.textarea.style.zIndex = '-10';
-          this.textarea.style.width = '0';
-          this.textarea.style.height = '0';
-          this.textarea.style.left = '0';
-          this.textarea.style.top = '0';
-          this.textarea.value = '';
+          this.textarea.style.pointerEvents = "none";
+          this.textarea.style.zIndex = "-10";
+          this.textarea.style.width = "0";
+          this.textarea.style.height = "0";
+          this.textarea.style.left = "0";
+          this.textarea.style.top = "0";
+          this.textarea.value = "";
 
           // Remove the one-time listeners
-          document.removeEventListener('click', resetTextarea);
-          document.removeEventListener('contextmenu', resetTextarea);
-          this.textarea.removeEventListener('blur', resetTextarea);
+          document.removeEventListener("click", resetTextarea);
+          document.removeEventListener("contextmenu", resetTextarea);
+          this.textarea.removeEventListener("blur", resetTextarea);
         };
 
         // Reset on any of these events (menu closed)
-        document.addEventListener('click', resetTextarea, { once: true });
-        document.addEventListener('contextmenu', resetTextarea, { once: true });
-        this.textarea.addEventListener('blur', resetTextarea, { once: true });
+        document.addEventListener("click", resetTextarea, { once: true });
+        document.addEventListener("contextmenu", resetTextarea, { once: true });
+        this.textarea.addEventListener("blur", resetTextarea, { once: true });
       }, 10);
 
       // Don't prevent default - let browser show the context menu on the textarea
     };
 
-    canvas.addEventListener('contextmenu', this.boundContextMenuHandler);
+    canvas.addEventListener("contextmenu", this.boundContextMenuHandler);
 
     // Click outside canvas - clear selection
     // This allows users to deselect by clicking anywhere outside the terminal
@@ -883,7 +887,7 @@ export class SelectionManager {
       }
     };
 
-    document.addEventListener('click', this.boundClickHandler);
+    document.addEventListener("click", this.boundClickHandler);
   }
 
   /**
@@ -1093,19 +1097,19 @@ export class SelectionManager {
       // Position textarea offscreen but in a way that allows selection
       const textarea = this.textarea;
       textarea.value = text;
-      textarea.style.position = 'fixed'; // Avoid scrolling to bottom
-      textarea.style.left = '-9999px';
-      textarea.style.top = '0';
-      textarea.style.width = '1px';
-      textarea.style.height = '1px';
-      textarea.style.opacity = '0';
+      textarea.style.position = "fixed"; // Avoid scrolling to bottom
+      textarea.style.left = "-9999px";
+      textarea.style.top = "0";
+      textarea.style.width = "1px";
+      textarea.style.height = "1px";
+      textarea.style.opacity = "0";
 
       // Select all text and copy
       textarea.focus();
       textarea.select();
       textarea.setSelectionRange(0, text.length);
 
-      const success = document.execCommand('copy');
+      const success = document.execCommand("copy");
 
       // Restore focus
       if (previouslyFocused) {
@@ -1113,10 +1117,10 @@ export class SelectionManager {
       }
 
       if (!success) {
-        console.error('❌ execCommand copy failed');
+        console.error("❌ execCommand copy failed");
       }
     } catch (err) {
-      console.error('❌ Fallback copy failed:', err);
+      console.error("❌ Fallback copy failed:", err);
       // Still try to restore focus even on error
       if (previouslyFocused) {
         previouslyFocused.focus();

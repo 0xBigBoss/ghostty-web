@@ -15,9 +15,9 @@
  * ```
  */
 
-import { EventEmitter } from './event-emitter';
-import type { GhosttyTerminal } from './ghostty';
-import { CellFlags } from './ghostty';
+import { EventEmitter } from "./event-emitter";
+import type { GhosttyTerminal } from "./ghostty";
+import { CellFlags } from "./ghostty";
 import type {
   IBuffer,
   IBufferCell,
@@ -25,9 +25,9 @@ import type {
   IBufferNamespace,
   IDisposable,
   IEvent,
-} from './interfaces';
-import type { Terminal } from './terminal';
-import type { GhosttyCell } from './types';
+} from "./interfaces";
+import type { Terminal } from "./terminal";
+import type { GhosttyCell } from "./types";
 
 // ============================================================================
 // BufferNamespace - Top-level buffer API
@@ -61,14 +61,14 @@ export class BufferNamespace implements IBufferNamespace {
 
   get normal(): IBuffer {
     if (!this._normalBuffer) {
-      this._normalBuffer = new Buffer(this.terminal, 'normal');
+      this._normalBuffer = new Buffer(this.terminal, "normal");
     }
     return this._normalBuffer;
   }
 
   get alternate(): IBuffer {
     if (!this._alternateBuffer) {
-      this._alternateBuffer = new Buffer(this.terminal, 'alternate');
+      this._alternateBuffer = new Buffer(this.terminal, "alternate");
     }
     return this._alternateBuffer;
   }
@@ -95,10 +95,10 @@ export class BufferNamespace implements IBufferNamespace {
  */
 export class Buffer implements IBuffer {
   private terminal: Terminal;
-  private bufferType: 'normal' | 'alternate';
+  private bufferType: "normal" | "alternate";
   private nullCell: BufferCell;
 
-  constructor(terminal: Terminal, type: 'normal' | 'alternate') {
+  constructor(terminal: Terminal, type: "normal" | "alternate") {
     this.terminal = terminal;
     this.bufferType = type;
 
@@ -119,7 +119,7 @@ export class Buffer implements IBuffer {
     this.nullCell = new BufferCell(nullCellData, 0);
   }
 
-  get type(): 'normal' | 'alternate' {
+  get type(): "normal" | "alternate" {
     return this.bufferType;
   }
 
@@ -151,7 +151,7 @@ export class Buffer implements IBuffer {
     const wasmTerm = this.getWasmTerm();
     if (!wasmTerm) return 0;
 
-    if (this.bufferType === 'alternate') {
+    if (this.bufferType === "alternate") {
       // Alternate buffer has no scrollback, just visible rows
       return wasmTerm.rows;
     } else {
@@ -176,7 +176,7 @@ export class Buffer implements IBuffer {
     let lineNumber: number;
     let isWrapped: boolean;
 
-    if (this.bufferType === 'normal' && y < scrollbackLength) {
+    if (this.bufferType === "normal" && y < scrollbackLength) {
       // Accessing scrollback
       // WASM getScrollbackLine: offset 0 = oldest, offset (length-1) = newest
       // Buffer coords: y=0 = oldest, y=(length-1) = newest
@@ -188,7 +188,7 @@ export class Buffer implements IBuffer {
       isWrapped = false;
     } else {
       // Accessing visible screen
-      lineNumber = this.bufferType === 'normal' ? y - scrollbackLength : y;
+      lineNumber = this.bufferType === "normal" ? y - scrollbackLength : y;
       cells = wasmTerm.getLine(lineNumber);
       isWrapped = wasmTerm.isRowWrapped(lineNumber);
     }
@@ -256,7 +256,7 @@ export class BufferLine implements IBufferLine {
           hyperlink_id: 0,
           grapheme_len: 0,
         },
-        x
+        x,
       );
     }
 
@@ -268,7 +268,7 @@ export class BufferLine implements IBufferLine {
     const start = Math.max(0, Math.min(startColumn, this._length));
     const end = Math.max(start, Math.min(endColumn, this._length));
 
-    let result = '';
+    let result = "";
     for (let x = start; x < end; x++) {
       const cell = this.getCell(x);
       if (cell) {
@@ -306,14 +306,14 @@ export class BufferCell implements IBufferCell {
 
     // Return empty string for null character or invalid codepoints
     if (codepoint === 0) {
-      return '';
+      return "";
     }
 
     // Validate codepoint is within valid Unicode range
     // Valid: 0x0000 to 0x10FFFF, excluding surrogates (0xD800-0xDFFF)
     if (codepoint < 0 || codepoint > 0x10ffff || (codepoint >= 0xd800 && codepoint <= 0xdfff)) {
       // Return replacement character for invalid codepoints
-      return '\uFFFD';
+      return "\uFFFD";
     }
 
     return String.fromCodePoint(codepoint);

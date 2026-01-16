@@ -172,7 +172,7 @@ bun run typecheck                     # Check types without compiling
 
 ```javascript
 // Access terminal instance (if exposed in demo)
-term.write('Hello!\r\n');
+term.write("Hello!\r\n");
 (term.cols, term.rows);
 term.wasmTerm.getCursor(); // WASM cursor state
 
@@ -198,9 +198,9 @@ console.log(cells);
 export class Terminal {
   // Add public method
   public myFeature(): void {
-    if (!this.wasmTerm) throw new Error('Not open');
+    if (!this.wasmTerm) throw new Error("Not open");
     // Use WASM terminal API
-    this.wasmTerm.write('...');
+    this.wasmTerm.write("...");
   }
 
   // Add event
@@ -230,11 +230,11 @@ export class MyAddon implements ITerminalAddon {
 
 ```typescript
 // Get terminal instance
-const ghostty = await Ghostty.load('./ghostty-vt.wasm');
+const ghostty = await Ghostty.load("./ghostty-vt.wasm");
 const wasmTerm = ghostty.createTerminal(80, 24);
 
 // Write data (processes VT100 sequences)
-wasmTerm.write('Hello\r\n\x1b[1;32mGreen\x1b[0m');
+wasmTerm.write("Hello\r\n\x1b[1;32mGreen\x1b[0m");
 
 // Read screen state
 const cursor = wasmTerm.getCursor(); // {x, y, visible, shape}
@@ -246,9 +246,9 @@ const isBold = (cell.flags & CellFlags.BOLD) !== 0;
 const isItalic = (cell.flags & CellFlags.ITALIC) !== 0;
 
 // Color extraction
-if (cell.fg.type === 'rgb') {
+if (cell.fg.type === "rgb") {
   const { r, g, b } = cell.fg.value;
-} else if (cell.fg.type === 'palette') {
+} else if (cell.fg.type === "palette") {
   const index = cell.fg.value; // 0-255
 }
 
@@ -256,7 +256,7 @@ if (cell.fg.type === 'rgb') {
 wasmTerm.resize(100, 30);
 
 // Clear screen
-wasmTerm.write('\x1bc'); // RIS (Reset to Initial State)
+wasmTerm.write("\x1bc"); // RIS (Reset to Initial State)
 ```
 
 ### Event System
@@ -279,15 +279,15 @@ disposable.dispose();  // Unsubscribe
 ### Testing Patterns
 
 ```typescript
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from "bun:test";
 
-describe('MyFeature', () => {
-  test('should do something', async () => {
+describe("MyFeature", () => {
+  test("should do something", async () => {
     const term = new Terminal({ cols: 80, rows: 24 });
-    const container = document.createElement('div');
+    const container = document.createElement("div");
     await term.open(container);
 
-    term.write('test\r\n');
+    term.write("test\r\n");
 
     // Check WASM state
     const cursor = term.wasmTerm!.getCursor();
@@ -370,7 +370,7 @@ await term.open(container);
 fitAddon.fit(); // ⚠️ Required! Otherwise terminal may not render
 
 // On window resize
-window.addEventListener('resize', () => fitAddon.fit());
+window.addEventListener("resize", () => fitAddon.fit());
 ```
 
 ## Common Tasks
@@ -398,9 +398,9 @@ window.addEventListener('resize', () => fitAddon.fit());
 
 ```typescript
 // In input-handler.ts
-if (e.ctrlKey && e.key === 'c') {
+if (e.ctrlKey && e.key === "c") {
   // Handle Ctrl+C
-  return '\x03'; // ETX character
+  return "\x03"; // ETX character
 }
 ```
 
@@ -408,8 +408,8 @@ if (e.ctrlKey && e.key === 'c') {
 
 ```typescript
 // In selection-manager.ts
-console.log('Selection:', this.start, this.end);
-console.log('Selected text:', this.getSelectedText());
+console.log("Selection:", this.start, this.end);
+console.log("Selected text:", this.getSelectedText());
 ```
 
 ## Resources

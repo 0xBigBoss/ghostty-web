@@ -6,8 +6,8 @@
  * For full integration tests, see examples/terminal-demo.html
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { FitAddon } from './fit';
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { FitAddon } from "./fit";
 
 // ============================================================================
 // Mock Terminal Implementation
@@ -31,7 +31,7 @@ class MockTerminal {
 // Test Suite
 // ============================================================================
 
-describe('FitAddon', () => {
+describe("FitAddon", () => {
   let addon: FitAddon;
   let terminal: MockTerminal;
 
@@ -48,16 +48,16 @@ describe('FitAddon', () => {
   // Activation & Disposal Tests
   // ==========================================================================
 
-  test('activates successfully', () => {
+  test("activates successfully", () => {
     expect(() => addon.activate(terminal as any)).not.toThrow();
   });
 
-  test('disposes successfully', () => {
+  test("disposes successfully", () => {
     addon.activate(terminal as any);
     expect(() => addon.dispose()).not.toThrow();
   });
 
-  test('can activate and dispose multiple times', () => {
+  test("can activate and dispose multiple times", () => {
     addon.activate(terminal as any);
     addon.dispose();
     addon.activate(terminal as any);
@@ -68,13 +68,13 @@ describe('FitAddon', () => {
   // proposeDimensions() Tests
   // ==========================================================================
 
-  test('proposeDimensions returns undefined without element', () => {
+  test("proposeDimensions returns undefined without element", () => {
     addon.activate(terminal as any);
     const dims = addon.proposeDimensions();
     expect(dims).toBeUndefined();
   });
 
-  test('proposeDimensions returns undefined without renderer', () => {
+  test("proposeDimensions returns undefined without renderer", () => {
     // Remove renderer
     (terminal as any).renderer = undefined;
     terminal.element = {} as HTMLElement;
@@ -88,7 +88,7 @@ describe('FitAddon', () => {
   // fit() Tests
   // ==========================================================================
 
-  test('fit() does nothing without element', () => {
+  test("fit() does nothing without element", () => {
     addon.activate(terminal as any);
     const originalCols = terminal.cols;
     const originalRows = terminal.rows;
@@ -103,7 +103,7 @@ describe('FitAddon', () => {
   // observeResize() Tests
   // ==========================================================================
 
-  test('observeResize() does not throw without element', () => {
+  test("observeResize() does not throw without element", () => {
     addon.activate(terminal as any);
     expect(() => addon.observeResize()).not.toThrow();
   });
@@ -112,7 +112,7 @@ describe('FitAddon', () => {
   // Integration Tests
   // ==========================================================================
 
-  test('full workflow: activate → fit → observeResize → dispose', () => {
+  test("full workflow: activate → fit → observeResize → dispose", () => {
     // Activate
     addon.activate(terminal as any);
 
@@ -126,7 +126,7 @@ describe('FitAddon', () => {
     addon.dispose();
   });
 
-  test('fit() after dispose does nothing', () => {
+  test("fit() after dispose does nothing", () => {
     addon.activate(terminal as any);
     addon.dispose();
 
@@ -139,7 +139,7 @@ describe('FitAddon', () => {
     expect(terminal.rows).toBe(originalRows);
   });
 
-  test('fit() prevents feedback loops by tracking dimensions', () => {
+  test("fit() prevents feedback loops by tracking dimensions", () => {
     addon.activate(terminal as any);
 
     // Track how many times resize is called
@@ -166,7 +166,7 @@ describe('FitAddon', () => {
 // Dimension Calculation Tests
 // ==========================================================================
 
-describe('Dimension Calculation', () => {
+describe("Dimension Calculation", () => {
   let addon: FitAddon;
 
   beforeEach(() => {
@@ -177,12 +177,12 @@ describe('Dimension Calculation', () => {
     addon.dispose();
   });
 
-  test('fit() calculates correct dimensions from container', () => {
+  test("fit() calculates correct dimensions from container", () => {
     // Create a mock element with known dimensions
     // FitAddon subtracts 15px for scrollbar, so we need to account for that
-    const mockElement = document.createElement('div');
-    Object.defineProperty(mockElement, 'clientWidth', { value: 900, configurable: true });
-    Object.defineProperty(mockElement, 'clientHeight', { value: 480, configurable: true });
+    const mockElement = document.createElement("div");
+    Object.defineProperty(mockElement, "clientWidth", { value: 900, configurable: true });
+    Object.defineProperty(mockElement, "clientHeight", { value: 480, configurable: true });
 
     let resizedCols = 0;
     let resizedRows = 0;
@@ -211,11 +211,11 @@ describe('Dimension Calculation', () => {
     expect(resizedRows).toBe(30);
   });
 
-  test('proposeDimensions returns correct values', () => {
+  test("proposeDimensions returns correct values", () => {
     // FitAddon subtracts 15px for scrollbar width
-    const mockElement = document.createElement('div');
-    Object.defineProperty(mockElement, 'clientWidth', { value: 720, configurable: true });
-    Object.defineProperty(mockElement, 'clientHeight', { value: 384, configurable: true });
+    const mockElement = document.createElement("div");
+    Object.defineProperty(mockElement, "clientWidth", { value: 720, configurable: true });
+    Object.defineProperty(mockElement, "clientHeight", { value: 384, configurable: true });
 
     const mockTerminal = {
       cols: 80,

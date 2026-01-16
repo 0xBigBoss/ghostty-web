@@ -9,7 +9,7 @@
  * @see https://bun.sh/docs/test/dom
  */
 
-import { GlobalRegistrator } from '@happy-dom/global-registrator';
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 // Register Happy DOM globals (window, document, etc.)
 GlobalRegistrator.register();
@@ -19,24 +19,24 @@ GlobalRegistrator.register();
 // This provides enough functionality for terminal tests to run without actual rendering.
 const originalGetContext = HTMLCanvasElement.prototype.getContext;
 HTMLCanvasElement.prototype.getContext = function (contextType: string, options?: any) {
-  if (contextType === '2d') {
+  if (contextType === "2d") {
     // Return a minimal mock of CanvasRenderingContext2D
     return {
       canvas: this,
-      fillStyle: '#000000',
-      strokeStyle: '#000000',
-      font: '12px monospace',
-      textAlign: 'start',
-      textBaseline: 'alphabetic',
+      fillStyle: "#000000",
+      strokeStyle: "#000000",
+      font: "12px monospace",
+      textAlign: "start",
+      textBaseline: "alphabetic",
       globalAlpha: 1,
-      globalCompositeOperation: 'source-over',
+      globalCompositeOperation: "source-over",
       imageSmoothingEnabled: true,
       lineWidth: 1,
-      lineCap: 'butt',
-      lineJoin: 'miter',
+      lineCap: "butt",
+      lineJoin: "miter",
       miterLimit: 10,
       shadowBlur: 0,
-      shadowColor: 'rgba(0, 0, 0, 0)',
+      shadowColor: "rgba(0, 0, 0, 0)",
       shadowOffsetX: 0,
       shadowOffsetY: 0,
 

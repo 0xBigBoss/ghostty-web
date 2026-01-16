@@ -4,9 +4,9 @@
  * Provides utilities for test isolation and setup.
  */
 
-import { Ghostty } from './ghostty';
-import type { ITerminalOptions } from './interfaces';
-import { Terminal } from './terminal';
+import { Ghostty } from "./ghostty";
+import type { ITerminalOptions } from "./interfaces";
+import { Terminal } from "./terminal";
 
 /**
  * Creates a Terminal instance with an isolated Ghostty WASM instance.
@@ -30,7 +30,7 @@ import { Terminal } from './terminal';
  * ```
  */
 export async function createIsolatedTerminal(
-  options: Omit<ITerminalOptions, 'ghostty'> = {}
+  options: Omit<ITerminalOptions, "ghostty"> = {},
 ): Promise<Terminal> {
   const ghostty = await Ghostty.load();
   return new Terminal({ ...options, ghostty });

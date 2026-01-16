@@ -8,7 +8,7 @@
  * take precedence over regex-detected URLs.
  */
 
-import type { IBufferRange, ILink, ILinkProvider } from '../types';
+import type { IBufferRange, ILink, ILinkProvider } from "../types";
 
 /**
  * URL Regex Provider
@@ -66,7 +66,7 @@ export class UrlRegexProvider implements ILinkProvider {
       let endX = match.index + url.length - 1; // Inclusive end
 
       // Strip trailing punctuation
-      const stripped = url.replace(UrlRegexProvider.TRAILING_PUNCTUATION, '');
+      const stripped = url.replace(UrlRegexProvider.TRAILING_PUNCTUATION, "");
       if (stripped.length < url.length) {
         url = stripped;
         endX = startX + url.length - 1;
@@ -83,7 +83,7 @@ export class UrlRegexProvider implements ILinkProvider {
           activate: (event) => {
             // Open link if Ctrl/Cmd is pressed
             if (event.ctrlKey || event.metaKey) {
-              window.open(url, '_blank', 'noopener,noreferrer');
+              window.open(url, "_blank", "noopener,noreferrer");
             }
           },
         });
@@ -105,20 +105,20 @@ export class UrlRegexProvider implements ILinkProvider {
     for (let x = 0; x < line.length; x++) {
       const cell = line.getCell(x);
       if (!cell) {
-        chars.push(' ');
+        chars.push(" ");
         continue;
       }
 
       const codepoint = cell.getCodepoint();
       // Skip null characters and control characters
       if (codepoint === 0 || codepoint < 32) {
-        chars.push(' ');
+        chars.push(" ");
       } else {
         chars.push(String.fromCodePoint(codepoint));
       }
     }
 
-    return chars.join('');
+    return chars.join("");
   }
 
   dispose(): void {

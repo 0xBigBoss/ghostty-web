@@ -13,10 +13,10 @@
  * - Captures all keyboard input (preventDefault on everything)
  */
 
-import type { Ghostty } from './ghostty';
-import type { KeyEncoder } from './ghostty';
-import type { IKeyEvent } from './interfaces';
-import { Key, KeyAction, KeyEncoderOption, Mods } from './types';
+import type { Ghostty } from "./ghostty";
+import type { KeyEncoder } from "./ghostty";
+import type { IKeyEvent } from "./interfaces";
+import { Key, KeyAction, KeyEncoderOption, Mods } from "./types";
 
 /**
  * Map KeyboardEvent.code values to USB HID Key enum values
@@ -192,7 +192,7 @@ export class InputHandler {
     onBell: () => void,
     onKey?: (keyEvent: IKeyEvent) => void,
     customKeyEventHandler?: (event: KeyboardEvent) => boolean | undefined,
-    getMode?: (mode: number) => boolean
+    getMode?: (mode: number) => boolean,
   ) {
     this.encoder = ghostty.createKeyEncoder();
     this.container = container;
@@ -220,33 +220,33 @@ export class InputHandler {
   private attach(): void {
     // Make container focusable so it can receive keyboard events (browser only)
     if (
-      typeof this.container.hasAttribute === 'function' &&
-      typeof this.container.setAttribute === 'function'
+      typeof this.container.hasAttribute === "function" &&
+      typeof this.container.setAttribute === "function"
     ) {
-      if (!this.container.hasAttribute('tabindex')) {
-        this.container.setAttribute('tabindex', '0');
+      if (!this.container.hasAttribute("tabindex")) {
+        this.container.setAttribute("tabindex", "0");
       }
 
       // Add visual focus indication (only if style exists - for browser environments)
       if (this.container.style) {
-        this.container.style.outline = 'none'; // Remove default outline
+        this.container.style.outline = "none"; // Remove default outline
       }
     }
 
     this.keydownListener = this.handleKeyDown.bind(this);
-    this.container.addEventListener('keydown', this.keydownListener);
+    this.container.addEventListener("keydown", this.keydownListener);
 
     this.pasteListener = this.handlePaste.bind(this);
-    this.container.addEventListener('paste', this.pasteListener);
+    this.container.addEventListener("paste", this.pasteListener);
 
     this.compositionStartListener = this.handleCompositionStart.bind(this);
-    this.container.addEventListener('compositionstart', this.compositionStartListener);
+    this.container.addEventListener("compositionstart", this.compositionStartListener);
 
     this.compositionUpdateListener = this.handleCompositionUpdate.bind(this);
-    this.container.addEventListener('compositionupdate', this.compositionUpdateListener);
+    this.container.addEventListener("compositionupdate", this.compositionUpdateListener);
 
     this.compositionEndListener = this.handleCompositionEnd.bind(this);
-    this.container.addEventListener('compositionend', this.compositionEndListener);
+    this.container.addEventListener("compositionend", this.compositionEndListener);
   }
 
   /**
@@ -332,7 +332,7 @@ export class InputHandler {
     }
 
     // Allow Ctrl+V and Cmd+V to trigger paste event (don't preventDefault)
-    if ((event.ctrlKey || event.metaKey) && event.code === 'KeyV') {
+    if ((event.ctrlKey || event.metaKey) && event.code === "KeyV") {
       // Let the browser's native paste event fire
       return;
     }
@@ -340,7 +340,7 @@ export class InputHandler {
     // Allow Cmd+C for copy (on Mac, Cmd+C should copy, not send interrupt)
     // SelectionManager handles the actual copying
     // Note: Ctrl+C on all platforms sends interrupt signal (0x03)
-    if (event.metaKey && event.code === 'KeyC') {
+    if (event.metaKey && event.code === "KeyC") {
       // Let browser/SelectionManager handle copy
       return;
     }
@@ -376,73 +376,73 @@ export class InputHandler {
 
       switch (key) {
         case Key.ENTER:
-          simpleOutput = '\r'; // Carriage return
+          simpleOutput = "\r"; // Carriage return
           break;
         case Key.TAB:
-          simpleOutput = '\t'; // Tab
+          simpleOutput = "\t"; // Tab
           break;
         case Key.BACKSPACE:
-          simpleOutput = '\x7F'; // DEL (most terminals use 0x7F for backspace)
+          simpleOutput = "\x7F"; // DEL (most terminals use 0x7F for backspace)
           break;
         case Key.ESCAPE:
-          simpleOutput = '\x1B'; // ESC
+          simpleOutput = "\x1B"; // ESC
           break;
         // Arrow keys are handled by the encoder (respects application cursor mode)
         // Navigation keys
         case Key.HOME:
-          simpleOutput = '\x1B[H';
+          simpleOutput = "\x1B[H";
           break;
         case Key.END:
-          simpleOutput = '\x1B[F';
+          simpleOutput = "\x1B[F";
           break;
         case Key.INSERT:
-          simpleOutput = '\x1B[2~';
+          simpleOutput = "\x1B[2~";
           break;
         case Key.DELETE:
-          simpleOutput = '\x1B[3~';
+          simpleOutput = "\x1B[3~";
           break;
         case Key.PAGE_UP:
-          simpleOutput = '\x1B[5~';
+          simpleOutput = "\x1B[5~";
           break;
         case Key.PAGE_DOWN:
-          simpleOutput = '\x1B[6~';
+          simpleOutput = "\x1B[6~";
           break;
         // Function keys
         case Key.F1:
-          simpleOutput = '\x1BOP';
+          simpleOutput = "\x1BOP";
           break;
         case Key.F2:
-          simpleOutput = '\x1BOQ';
+          simpleOutput = "\x1BOQ";
           break;
         case Key.F3:
-          simpleOutput = '\x1BOR';
+          simpleOutput = "\x1BOR";
           break;
         case Key.F4:
-          simpleOutput = '\x1BOS';
+          simpleOutput = "\x1BOS";
           break;
         case Key.F5:
-          simpleOutput = '\x1B[15~';
+          simpleOutput = "\x1B[15~";
           break;
         case Key.F6:
-          simpleOutput = '\x1B[17~';
+          simpleOutput = "\x1B[17~";
           break;
         case Key.F7:
-          simpleOutput = '\x1B[18~';
+          simpleOutput = "\x1B[18~";
           break;
         case Key.F8:
-          simpleOutput = '\x1B[19~';
+          simpleOutput = "\x1B[19~";
           break;
         case Key.F9:
-          simpleOutput = '\x1B[20~';
+          simpleOutput = "\x1B[20~";
           break;
         case Key.F10:
-          simpleOutput = '\x1B[21~';
+          simpleOutput = "\x1B[21~";
           break;
         case Key.F11:
-          simpleOutput = '\x1B[23~';
+          simpleOutput = "\x1B[23~";
           break;
         case Key.F12:
-          simpleOutput = '\x1B[24~';
+          simpleOutput = "\x1B[24~";
           break;
       }
 
@@ -494,7 +494,7 @@ export class InputHandler {
       }
     } catch (error) {
       // Encoding failed - log but don't crash
-      console.warn('Failed to encode key:', event.code, error);
+      console.warn("Failed to encode key:", event.code, error);
     }
   }
 
@@ -512,14 +512,14 @@ export class InputHandler {
     // Get clipboard data
     const clipboardData = event.clipboardData;
     if (!clipboardData) {
-      console.warn('No clipboard data available');
+      console.warn("No clipboard data available");
       return;
     }
 
     // Get text from clipboard
-    const text = clipboardData.getData('text/plain');
+    const text = clipboardData.getData("text/plain");
     if (!text) {
-      console.warn('No text in clipboard');
+      console.warn("No text in clipboard");
       return;
     }
 
@@ -528,7 +528,7 @@ export class InputHandler {
 
     if (hasBracketedPaste) {
       // Wrap with bracketed paste sequences
-      this.onDataCallback('\x1b[200~' + text + '\x1b[201~');
+      this.onDataCallback("\x1b[200~" + text + "\x1b[201~");
     } else {
       // Send raw text
       this.onDataCallback(text);
@@ -586,32 +586,32 @@ export class InputHandler {
     if (this.isDisposed) return;
 
     if (this.keydownListener) {
-      this.container.removeEventListener('keydown', this.keydownListener);
+      this.container.removeEventListener("keydown", this.keydownListener);
       this.keydownListener = null;
     }
 
     if (this.keypressListener) {
-      this.container.removeEventListener('keypress', this.keypressListener);
+      this.container.removeEventListener("keypress", this.keypressListener);
       this.keypressListener = null;
     }
 
     if (this.pasteListener) {
-      this.container.removeEventListener('paste', this.pasteListener);
+      this.container.removeEventListener("paste", this.pasteListener);
       this.pasteListener = null;
     }
 
     if (this.compositionStartListener) {
-      this.container.removeEventListener('compositionstart', this.compositionStartListener);
+      this.container.removeEventListener("compositionstart", this.compositionStartListener);
       this.compositionStartListener = null;
     }
 
     if (this.compositionUpdateListener) {
-      this.container.removeEventListener('compositionupdate', this.compositionUpdateListener);
+      this.container.removeEventListener("compositionupdate", this.compositionUpdateListener);
       this.compositionUpdateListener = null;
     }
 
     if (this.compositionEndListener) {
-      this.container.removeEventListener('compositionend', this.compositionEndListener);
+      this.container.removeEventListener("compositionend", this.compositionEndListener);
       this.compositionEndListener = null;
     }
 

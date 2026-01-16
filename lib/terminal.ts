@@ -15,11 +15,11 @@
  * ```
  */
 
-import { BufferNamespace } from './buffer';
-import { EventEmitter } from './event-emitter';
-import type { Ghostty, GhosttyCell, GhosttyTerminal, GhosttyTerminalConfig } from './ghostty';
-import { getGhostty } from './index';
-import { InputHandler } from './input-handler';
+import { BufferNamespace } from "./buffer";
+import { EventEmitter } from "./event-emitter";
+import type { Ghostty, GhosttyCell, GhosttyTerminal, GhosttyTerminalConfig } from "./ghostty";
+import { getGhostty } from "./index";
+import { InputHandler } from "./input-handler";
 import type {
   IBufferNamespace,
   IBufferRange,
@@ -30,19 +30,40 @@ import type {
   ITerminalCore,
   ITerminalOptions,
   IUnicodeVersionProvider,
-} from './interfaces';
-import { LinkDetector } from './link-detector';
-import { OSC8LinkProvider } from './providers/osc8-link-provider';
-import { UrlRegexProvider } from './providers/url-regex-provider';
-import { CanvasRenderer } from './renderer';
-import { SelectionManager } from './selection-manager';
-import type { ILink, ILinkProvider } from './types';
+} from "./interfaces";
+import { LinkDetector } from "./link-detector";
+import { OSC8LinkProvider } from "./providers/osc8-link-provider";
+import { UrlRegexProvider } from "./providers/url-regex-provider";
+import { CanvasRenderer } from "./renderer";
+import type { HyperlinkRange, LinkRange, RenderInput, Renderer } from "./renderer-types";
+import {
+  ROW_DIRTY,
+  ROW_HAS_HYPERLINK,
+  ROW_HAS_SELECTION,
+} from "./renderer-types";
+import { SelectionManager } from "./selection-manager";
+import { resolveTheme } from "./theme";
+import type { ILink, ILinkProvider } from "./types";
+import { DirtyState } from "./types";
 
 // ============================================================================
 // Terminal Class
 // ============================================================================
 
 export class Terminal implements ITerminalCore {
+  private static readonly EMPTY_CELL: GhosttyCell = {
+    codepoint: 0,
+    fg_r: 0,
+    fg_g: 0,
+    fg_b: 0,
+    bg_r: 0,
+    bg_g: 0,
+    bg_b: 0,
+    flags: 0,
+    width: 1,
+    hyperlink_id: 0,
+    grapheme_len: 0,
+  };
   // Public properties (xterm.js compatibility)
   public cols: number;
   public rows: number;
@@ -55,7 +76,7 @@ export class Terminal implements ITerminalCore {
   // Unicode API (xterm.js compatibility)
   public readonly unicode: IUnicodeVersionProvider = {
     get activeVersion(): string {
-      return '15.1'; // Ghostty supports Unicode 15.1
+      return "15.1"; // Ghostty supports Unicode 15.1
     },
   };
 
@@ -65,7 +86,7 @@ export class Terminal implements ITerminalCore {
   // Components (created on open())
   private ghostty?: Ghostty;
   public wasmTerm?: GhosttyTerminal; // Made public for link providers
-  public renderer?: CanvasRenderer; // Made public for FitAddon
+  public renderer?: Renderer; // Made public for FitAddon
   private inputHandler?: InputHandler;
   private selectionManager?: SelectionManager;
   private canvas?: HTMLCanvasElement;
@@ -114,7 +135,7 @@ export class Terminal implements ITerminalCore {
   private customKeyEventHandler?: (event: KeyboardEvent) => boolean | undefined;
 
   // Phase 1: Title tracking
-  private currentTitle: string = '';
+  private currentTitle: string = "";
 
   // Phase 2: Viewport and scrolling state
   public viewportY: number = 0; // Top line of viewport in scrollback buffer (0 = at bottom, can be fractional during smooth scroll)
@@ -137,6 +158,18 @@ export class Terminal implements ITerminalCore {
   private scrollbarHideTimeout?: number;
   private readonly SCROLLBAR_HIDE_DELAY_MS = 1500; // Hide after 1.5 seconds
   private readonly SCROLLBAR_FADE_DURATION_MS = 200; // 200ms fade animation
+  private resolvedTheme = resolveTheme();
+  private rowFlags = new Uint8Array(0);
+  private composedViewportCells: GhosttyCell[] = [];
+  private lastViewportYForRender: number = 0;
+  private lastCursorPosition: { x: number; y: number } = { x: 0, y: 0 };
+  private lastCursorVisible: boolean = true;
+  private lastBlinkVisible: boolean = true;
+  private hoveredHyperlinkId: number = 0;
+  private hoveredLinkRange: LinkRange | null = null;
+  private previousHoveredHyperlinkId: number = 0;
+  private previousHoveredLinkRange: LinkRange | null = null;
+  private forceFullRender: boolean = false;
 
   constructor(options: ITerminalOptions = {}) {
     // Use provided Ghostty instance (for test isolation) or get module-level instance
@@ -150,15 +183,16 @@ export class Terminal implements ITerminalCore {
       cols: options.cols ?? 80,
       rows: options.rows ?? 24,
       cursorBlink: options.cursorBlink ?? false,
-      cursorStyle: options.cursorStyle ?? 'block',
+      cursorStyle: options.cursorStyle ?? "block",
       theme: options.theme ?? {},
       scrollback: options.scrollback ?? 10000,
       fontSize: options.fontSize ?? 15,
-      fontFamily: options.fontFamily ?? 'monospace',
+      fontFamily: options.fontFamily ?? "monospace",
       allowTransparency: options.allowTransparency ?? false,
       convertEol: options.convertEol ?? false,
       disableStdin: options.disableStdin ?? false,
       smoothScrollDuration: options.smoothScrollDuration ?? 100, // Default: 100ms smooth scroll
+      renderer: options.renderer,
     };
 
     // Wrap in Proxy to intercept runtime changes (xterm.js compatibility)
@@ -178,6 +212,7 @@ export class Terminal implements ITerminalCore {
 
     this.cols = this.options.cols;
     this.rows = this.options.rows;
+    this.resolvedTheme = resolveTheme(this.options.theme);
 
     // Initialize buffer API
     this.buffer = new BufferNamespace(this);
@@ -195,45 +230,40 @@ export class Terminal implements ITerminalCore {
     if (newValue === oldValue) return;
 
     switch (key) {
-      case 'disableStdin':
+      case "disableStdin":
         // Input handler already checks this.options.disableStdin dynamically
         // No action needed
         break;
 
-      case 'cursorBlink':
-      case 'cursorStyle':
-        if (this.renderer) {
-          this.renderer.setCursorStyle(this.options.cursorStyle);
-          this.renderer.setCursorBlink(this.options.cursorBlink);
-        }
+      case "cursorBlink":
+      case "cursorStyle":
+        this.forceFullRender = true;
         break;
 
-      case 'theme':
+      case "theme":
+        this.resolvedTheme = resolveTheme(this.options.theme);
         if (this.renderer) {
-          this.renderer.setTheme(this.options.theme);
-          // Force full re-render with new theme
-          if (this.wasmTerm) {
-            this.renderer.render(this.wasmTerm, true, this.viewportY, this);
-          }
+          this.renderer.updateTheme(this.resolvedTheme);
         }
+        this.forceFullRender = true;
         break;
 
-      case 'fontSize':
+      case "fontSize":
         if (this.renderer) {
           this.renderer.setFontSize(this.options.fontSize);
           this.handleFontChange();
         }
         break;
 
-      case 'fontFamily':
+      case "fontFamily":
         if (this.renderer) {
           this.renderer.setFontFamily(this.options.fontFamily);
           this.handleFontChange();
         }
         break;
 
-      case 'cols':
-      case 'rows':
+      case "cols":
+      case "rows":
         // Redirect to resize method
         this.resize(this.options.cols, this.options.rows);
         break;
@@ -245,25 +275,15 @@ export class Terminal implements ITerminalCore {
    * Updates canvas size to match new font metrics and forces a full re-render
    */
   private handleFontChange(): void {
-    if (!this.renderer || !this.wasmTerm || !this.canvas) return;
+    if (!this.renderer || !this.wasmTerm) return;
 
     // Clear any active selection since pixel positions have changed
     if (this.selectionManager) {
       this.selectionManager.clearSelection();
     }
 
-    // Resize canvas to match new font metrics
     this.renderer.resize(this.cols, this.rows);
-
-    // Update canvas element dimensions to match renderer
-    const metrics = this.renderer.getMetrics();
-    this.canvas.width = metrics.width * this.cols;
-    this.canvas.height = metrics.height * this.rows;
-    this.canvas.style.width = `${metrics.width * this.cols}px`;
-    this.canvas.style.height = `${metrics.height * this.rows}px`;
-
-    // Force full re-render with new font
-    this.renderer.render(this.wasmTerm, true, this.viewportY, this);
+    this.forceFullRender = true;
   }
 
   /**
@@ -274,7 +294,7 @@ export class Terminal implements ITerminalCore {
     if (!color) return 0;
 
     // Handle hex colors (#RGB, #RRGGBB)
-    if (color.startsWith('#')) {
+    if (color.startsWith("#")) {
       let hex = color.slice(1);
       if (hex.length === 3) {
         hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
@@ -350,10 +370,10 @@ export class Terminal implements ITerminalCore {
    */
   open(parent: HTMLElement): void {
     if (this.isOpen) {
-      throw new Error('Terminal is already open');
+      throw new Error("Terminal is already open");
     }
     if (this.isDisposed) {
-      throw new Error('Terminal has been disposed');
+      throw new Error("Terminal has been disposed");
     }
 
     // Store parent element
@@ -362,74 +382,78 @@ export class Terminal implements ITerminalCore {
 
     try {
       // Make parent focusable if it isn't already
-      if (!parent.hasAttribute('tabindex')) {
-        parent.setAttribute('tabindex', '0');
+      if (!parent.hasAttribute("tabindex")) {
+        parent.setAttribute("tabindex", "0");
       }
 
       // Mark as contenteditable so browser extensions (Vimium, etc.) recognize
       // this as an input element and don't intercept keyboard events.
-      parent.setAttribute('contenteditable', 'true');
+      parent.setAttribute("contenteditable", "true");
       // Prevent actual content editing - we handle input ourselves
-      parent.addEventListener('beforeinput', (e) => e.preventDefault());
+      parent.addEventListener("beforeinput", (e) => e.preventDefault());
 
       // Add accessibility attributes for screen readers and extensions
-      parent.setAttribute('role', 'textbox');
-      parent.setAttribute('aria-label', 'Terminal input');
-      parent.setAttribute('aria-multiline', 'true');
+      parent.setAttribute("role", "textbox");
+      parent.setAttribute("aria-label", "Terminal input");
+      parent.setAttribute("aria-multiline", "true");
 
       // Create WASM terminal with current dimensions and config
       const config = this.buildWasmConfig();
       this.wasmTerm = this.ghostty!.createTerminal(this.cols, this.rows, config);
 
       // Create canvas element
-      this.canvas = document.createElement('canvas');
-      this.canvas.style.display = 'block';
+      this.canvas = document.createElement("canvas");
+      this.canvas.style.display = "block";
       parent.appendChild(this.canvas);
 
       // Create hidden textarea for keyboard input (must be inside parent for event bubbling)
-      this.textarea = document.createElement('textarea');
-      this.textarea.setAttribute('autocorrect', 'off');
-      this.textarea.setAttribute('autocapitalize', 'off');
-      this.textarea.setAttribute('spellcheck', 'false');
-      this.textarea.setAttribute('tabindex', '0'); // Allow focus for mobile keyboard
-      this.textarea.setAttribute('aria-label', 'Terminal input');
+      this.textarea = document.createElement("textarea");
+      this.textarea.setAttribute("autocorrect", "off");
+      this.textarea.setAttribute("autocapitalize", "off");
+      this.textarea.setAttribute("spellcheck", "false");
+      this.textarea.setAttribute("tabindex", "0"); // Allow focus for mobile keyboard
+      this.textarea.setAttribute("aria-label", "Terminal input");
       // Use clip-path to completely hide the textarea and its caret
-      this.textarea.style.position = 'absolute';
-      this.textarea.style.left = '0';
-      this.textarea.style.top = '0';
-      this.textarea.style.width = '1px';
-      this.textarea.style.height = '1px';
-      this.textarea.style.padding = '0';
-      this.textarea.style.border = 'none';
-      this.textarea.style.margin = '0';
-      this.textarea.style.opacity = '0';
-      this.textarea.style.clipPath = 'inset(50%)'; // Clip everything including caret
-      this.textarea.style.overflow = 'hidden';
-      this.textarea.style.whiteSpace = 'nowrap';
-      this.textarea.style.resize = 'none';
+      this.textarea.style.position = "absolute";
+      this.textarea.style.left = "0";
+      this.textarea.style.top = "0";
+      this.textarea.style.width = "1px";
+      this.textarea.style.height = "1px";
+      this.textarea.style.padding = "0";
+      this.textarea.style.border = "none";
+      this.textarea.style.margin = "0";
+      this.textarea.style.opacity = "0";
+      this.textarea.style.clipPath = "inset(50%)"; // Clip everything including caret
+      this.textarea.style.overflow = "hidden";
+      this.textarea.style.whiteSpace = "nowrap";
+      this.textarea.style.resize = "none";
       parent.appendChild(this.textarea);
 
       // Focus textarea on interaction - preventDefault before focus
       const textarea = this.textarea;
       // Desktop: mousedown
-      this.canvas.addEventListener('mousedown', (ev) => {
+      this.canvas.addEventListener("mousedown", (ev) => {
         ev.preventDefault();
         textarea.focus();
       });
       // Mobile: touchend with preventDefault to suppress iOS caret
-      this.canvas.addEventListener('touchend', (ev) => {
+      this.canvas.addEventListener("touchend", (ev) => {
         ev.preventDefault();
         textarea.focus();
       });
 
       // Create renderer
-      this.renderer = new CanvasRenderer(this.canvas, {
-        fontSize: this.options.fontSize,
-        fontFamily: this.options.fontFamily,
-        cursorStyle: this.options.cursorStyle,
-        cursorBlink: this.options.cursorBlink,
-        theme: this.options.theme,
-      });
+      this.renderer =
+        this.options.renderer ??
+        new CanvasRenderer({
+          fontSize: this.options.fontSize,
+          fontFamily: this.options.fontFamily,
+          theme: this.options.theme,
+        });
+      this.renderer.attach(this.canvas);
+      this.renderer.setFontSize(this.options.fontSize);
+      this.renderer.setFontFamily(this.options.fontFamily);
+      this.renderer.updateTheme(this.resolvedTheme);
 
       // Size canvas to terminal dimensions (use renderer.resize for proper DPI scaling)
       this.renderer.resize(this.cols, this.rows);
@@ -458,7 +482,7 @@ export class Terminal implements ITerminalCore {
         (mode: number) => {
           // Query terminal mode state (e.g., mode 1 for application cursor mode)
           return this.wasmTerm?.getMode(mode, false) ?? false;
-        }
+        },
       );
 
       // Create selection manager (pass textarea for context menu positioning)
@@ -466,11 +490,8 @@ export class Terminal implements ITerminalCore {
         this,
         this.renderer,
         this.wasmTerm,
-        this.textarea
+        this.textarea,
       );
-
-      // Connect selection manager to renderer
-      this.renderer.setSelectionManager(this.selectionManager);
 
       // Forward selection change events
       this.selectionManager.onSelectionChange(() => {
@@ -478,10 +499,10 @@ export class Terminal implements ITerminalCore {
       });
 
       // Setup paste event handler on textarea
-      this.textarea.addEventListener('paste', (e: ClipboardEvent) => {
+      this.textarea.addEventListener("paste", (e: ClipboardEvent) => {
         e.preventDefault();
         e.stopPropagation(); // Prevent event from bubbling to parent (InputHandler)
-        const text = e.clipboardData?.getData('text');
+        const text = e.clipboardData?.getData("text");
         if (text) {
           // Use the paste() method which will handle bracketed paste mode in the future
           this.paste(text);
@@ -499,20 +520,20 @@ export class Terminal implements ITerminalCore {
 
       // Setup mouse event handling for links and scrollbar
       // Use capture phase to intercept scrollbar clicks before SelectionManager
-      parent.addEventListener('mousedown', this.handleMouseDown, { capture: true });
-      parent.addEventListener('mousemove', this.handleMouseMove);
-      parent.addEventListener('mouseleave', this.handleMouseLeave);
-      parent.addEventListener('click', this.handleClick);
+      parent.addEventListener("mousedown", this.handleMouseDown, { capture: true });
+      parent.addEventListener("mousemove", this.handleMouseMove);
+      parent.addEventListener("mouseleave", this.handleMouseLeave);
+      parent.addEventListener("click", this.handleClick);
 
       // Setup document-level mouseup for scrollbar drag (so drag works even outside canvas)
-      document.addEventListener('mouseup', this.handleMouseUp);
+      document.addEventListener("mouseup", this.handleMouseUp);
 
       // Setup wheel event handling for scrolling (Phase 2)
       // Use capture phase to ensure we get the event before browser scrolling
-      parent.addEventListener('wheel', this.handleWheel, { passive: false, capture: true });
+      parent.addEventListener("wheel", this.handleWheel, { passive: false, capture: true });
 
       // Render initial blank screen (force full redraw)
-      this.renderer.render(this.wasmTerm, true, this.viewportY, this, this.scrollbarOpacity);
+      this.renderFrame(true, this.scrollbarOpacity);
 
       // Start render loop
       this.startRenderLoop();
@@ -534,8 +555,8 @@ export class Terminal implements ITerminalCore {
     this.assertOpen();
 
     // Handle convertEol option
-    if (this.options.convertEol && typeof data === 'string') {
-      data = data.replace(/\n/g, '\r\n');
+    if (this.options.convertEol && typeof data === "string") {
+      data = data.replace(/\n/g, "\r\n");
     }
 
     // Queue writes during resize to prevent WASM race conditions.
@@ -567,7 +588,7 @@ export class Terminal implements ITerminalCore {
 
     // Check for bell character (BEL, \x07)
     // WASM doesn't expose bell events, so we detect it in the data stream
-    if (typeof data === 'string' && data.includes('\x07')) {
+    if (typeof data === "string" && data.includes("\x07")) {
       this.bellEmitter.fire();
     } else if (data instanceof Uint8Array && data.includes(0x07)) {
       this.bellEmitter.fire();
@@ -583,7 +604,7 @@ export class Terminal implements ITerminalCore {
 
     // Check for title changes (OSC 0, 1, 2 sequences)
     // This is a simplified implementation - Ghostty WASM may provide this
-    if (typeof data === 'string' && data.includes('\x1b]')) {
+    if (typeof data === "string" && data.includes("\x1b]")) {
       this.checkForTitleChange(data);
     }
 
@@ -600,8 +621,8 @@ export class Terminal implements ITerminalCore {
    * Write data with newline
    */
   writeln(data: string | Uint8Array, callback?: () => void): void {
-    if (typeof data === 'string') {
-      this.write(data + '\r\n', callback);
+    if (typeof data === "string") {
+      this.write(data + "\r\n", callback);
     } else {
       // Append \r\n to Uint8Array
       const newData = new Uint8Array(data.length + 2);
@@ -626,7 +647,7 @@ export class Terminal implements ITerminalCore {
     // Check if terminal has bracketed paste mode enabled
     if (this.wasmTerm!.hasBracketedPaste()) {
       // Wrap with bracketed paste sequences (DEC mode 2004)
-      this.dataEmitter.fire('\x1b[200~' + data + '\x1b[201~');
+      this.dataEmitter.fire("\x1b[200~" + data + "\x1b[201~");
     } else {
       // Send data directly
       this.dataEmitter.fire(data);
@@ -700,20 +721,13 @@ export class Terminal implements ITerminalCore {
       // Resize renderer
       this.renderer!.resize(cols, rows);
 
-      // Update canvas dimensions
-      const metrics = this.renderer!.getMetrics();
-      this.canvas!.width = metrics.width * cols;
-      this.canvas!.height = metrics.height * rows;
-      this.canvas!.style.width = `${metrics.width * cols}px`;
-      this.canvas!.style.height = `${metrics.height * rows}px`;
-
       // Fire resize event
       this.resizeEmitter.fire({ cols, rows });
 
       // Force full render with new dimensions
-      this.renderer!.render(this.wasmTerm!, true, this.viewportY, this);
+      this.renderFrame(true, this.scrollbarOpacity);
     } catch (err) {
-      console.error('[ghostty-web] Resize error:', err);
+      console.error("[ghostty-web] Resize error:", err);
       // Still clear the flag so future resizes can proceed
     }
 
@@ -754,7 +768,7 @@ export class Terminal implements ITerminalCore {
   clear(): void {
     this.assertOpen();
     // Send ANSI clear screen and cursor home sequences
-    this.wasmTerm!.write('\x1b[2J\x1b[H');
+    this.wasmTerm!.write("\x1b[2J\x1b[H");
   }
 
   /**
@@ -774,7 +788,7 @@ export class Terminal implements ITerminalCore {
     this.renderer!.clear();
 
     // Reset title
-    this.currentTitle = '';
+    this.currentTitle = "";
   }
 
   /**
@@ -818,7 +832,7 @@ export class Terminal implements ITerminalCore {
    * Get the selected text as a string
    */
   public getSelection(): string {
-    return this.selectionManager?.getSelection() || '';
+    return this.selectionManager?.getSelection() || "";
   }
 
   /**
@@ -884,7 +898,7 @@ export class Terminal implements ITerminalCore {
    *          undefined = continue with default terminal processing
    */
   public attachCustomKeyEventHandler(
-    customKeyEventHandler: (event: KeyboardEvent) => boolean | undefined
+    customKeyEventHandler: (event: KeyboardEvent) => boolean | undefined,
   ): void {
     this.customKeyEventHandler = customKeyEventHandler;
     // Update input handler if already created
@@ -898,7 +912,7 @@ export class Terminal implements ITerminalCore {
    * Returns true to prevent default handling
    */
   public attachCustomWheelEventHandler(
-    customWheelEventHandler?: (event: WheelEvent) => boolean
+    customWheelEventHandler?: (event: WheelEvent) => boolean,
   ): void {
     this.customWheelEventHandler = customWheelEventHandler;
   }
@@ -923,7 +937,7 @@ export class Terminal implements ITerminalCore {
    */
   public registerLinkProvider(provider: ILinkProvider): void {
     if (!this.linkDetector) {
-      throw new Error('Terminal must be opened before registering link providers');
+      throw new Error("Terminal must be opened before registering link providers");
     }
     this.linkDetector.registerProvider(provider);
   }
@@ -938,7 +952,7 @@ export class Terminal implements ITerminalCore {
    */
   public scrollLines(amount: number): void {
     if (!this.wasmTerm) {
-      throw new Error('Terminal not open');
+      throw new Error("Terminal not open");
     }
 
     const scrollbackLength = this.getScrollbackLength();
@@ -1178,6 +1192,223 @@ export class Terminal implements ITerminalCore {
   // Private Methods
   // ==========================================================================
 
+  private ensureRowFlags(rows: number): Uint8Array {
+    if (this.rowFlags.length !== rows) {
+      this.rowFlags = new Uint8Array(rows);
+    }
+    return this.rowFlags;
+  }
+
+  private rangesEqual(a: LinkRange | null, b: LinkRange | null): boolean {
+    if (!a && !b) return true;
+    if (!a || !b) return false;
+    return a.startX === b.startX && a.startY === b.startY && a.endX === b.endX && a.endY === b.endY;
+  }
+
+  private composeViewportCells(
+    viewportY: number,
+    cols: number,
+    rows: number,
+    scrollbackLength: number,
+  ): GhosttyCell[] {
+    if (!this.wasmTerm) return [];
+    if (viewportY <= 0) {
+      return this.wasmTerm.getViewport();
+    }
+
+    const screenCells = this.wasmTerm.getViewport();
+    const total = cols * rows;
+    if (this.composedViewportCells.length !== total) {
+      this.composedViewportCells = new Array(total);
+    }
+    const out = this.composedViewportCells;
+    const emptyCell = Terminal.EMPTY_CELL;
+
+    for (let row = 0; row < rows; row++) {
+      const outOffset = row * cols;
+      if (row < viewportY) {
+        const scrollbackOffset = scrollbackLength - viewportY + row;
+        const line =
+          scrollbackOffset >= 0 && scrollbackOffset < scrollbackLength
+            ? this.wasmTerm.getScrollbackLine(scrollbackOffset)
+            : null;
+        for (let col = 0; col < cols; col++) {
+          out[outOffset + col] = line?.[col] ?? emptyCell;
+        }
+      } else {
+        const screenRow = row - viewportY;
+        if (screenRow < 0 || screenRow >= rows) {
+          for (let col = 0; col < cols; col++) {
+            out[outOffset + col] = emptyCell;
+          }
+          continue;
+        }
+        const screenOffset = screenRow * cols;
+        for (let col = 0; col < cols; col++) {
+          out[outOffset + col] = screenCells[screenOffset + col] ?? emptyCell;
+        }
+      }
+    }
+
+    return out;
+  }
+
+  private buildRenderInput(forceAll: boolean, scrollbarOpacity: number): RenderInput | null {
+    if (!this.renderer || !this.wasmTerm) return null;
+
+    const cols = this.cols;
+    const rows = this.rows;
+    const rawViewportY = this.getViewportY();
+    const viewportY = Math.max(0, Math.floor(rawViewportY));
+
+    let dirtyState = this.wasmTerm.update();
+    if (forceAll || viewportY > 0 || viewportY !== this.lastViewportYForRender) {
+      dirtyState = DirtyState.FULL;
+    }
+    this.lastViewportYForRender = viewportY;
+
+    const scrollbackLength = this.wasmTerm.getScrollbackLength();
+    const viewportCells = this.composeViewportCells(viewportY, cols, rows, scrollbackLength);
+    const rowFlags = this.ensureRowFlags(rows);
+    rowFlags.fill(0);
+
+    if (dirtyState === DirtyState.FULL) {
+      rowFlags.fill(ROW_DIRTY);
+    } else if (dirtyState === DirtyState.PARTIAL) {
+      for (let y = 0; y < rows; y++) {
+        if (this.wasmTerm.isRowDirty(y)) {
+          rowFlags[y] |= ROW_DIRTY;
+        }
+      }
+    }
+
+    const selectionRange = this.selectionManager?.getSelectionCoords() ?? null;
+    if (selectionRange) {
+      for (let y = selectionRange.startRow; y <= selectionRange.endRow; y++) {
+        if (y >= 0 && y < rows) {
+          rowFlags[y] |= ROW_HAS_SELECTION;
+        }
+      }
+    }
+
+    if (this.selectionManager) {
+      const dirtyRows = this.selectionManager.getDirtySelectionRows();
+      if (dirtyRows.size > 0) {
+        for (const row of dirtyRows) {
+          if (row >= 0 && row < rows) {
+            rowFlags[row] |= ROW_DIRTY | ROW_HAS_SELECTION;
+          }
+        }
+        this.selectionManager.clearDirtySelectionRows();
+      }
+    }
+
+    const cursor = this.wasmTerm.getCursorFromState();
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const blinkVisible =
+      !this.options.cursorBlink || Math.floor(now / 530) % 2 === 0;
+    const cursorVisible = cursor.visible && viewportY === 0 && blinkVisible;
+    const cursorMoved =
+      cursor.x !== this.lastCursorPosition.x || cursor.y !== this.lastCursorPosition.y;
+    const cursorVisibilityChanged = cursorVisible !== this.lastCursorVisible;
+    const blinkChanged = blinkVisible !== this.lastBlinkVisible;
+
+    if (cursorMoved || cursorVisibilityChanged || blinkChanged) {
+      const markRow = (row: number) => {
+        if (row >= 0 && row < rows) {
+          rowFlags[row] |= ROW_DIRTY;
+        }
+      };
+      markRow(this.lastCursorPosition.y);
+      markRow(cursor.y);
+    }
+    this.lastCursorPosition = { x: cursor.x, y: cursor.y };
+    this.lastCursorVisible = cursorVisible;
+    this.lastBlinkVisible = blinkVisible;
+
+    const hyperlinkChanged = this.hoveredHyperlinkId !== this.previousHoveredHyperlinkId;
+    if (hyperlinkChanged) {
+      for (let y = 0; y < rows; y++) {
+        const rowOffset = y * cols;
+        for (let x = 0; x < cols; x++) {
+          const cell = viewportCells[rowOffset + x];
+          if (
+            cell &&
+            (cell.hyperlink_id === this.hoveredHyperlinkId ||
+              cell.hyperlink_id === this.previousHoveredHyperlinkId)
+          ) {
+            rowFlags[y] |= ROW_DIRTY | ROW_HAS_HYPERLINK;
+            break;
+          }
+        }
+      }
+      this.previousHoveredHyperlinkId = this.hoveredHyperlinkId;
+    }
+
+    const rangeChanged = !this.rangesEqual(this.hoveredLinkRange, this.previousHoveredLinkRange);
+    if (rangeChanged) {
+      const markRangeRows = (range: LinkRange | null) => {
+        if (!range) return;
+        for (let y = range.startY; y <= range.endY; y++) {
+          if (y >= 0 && y < rows) {
+            rowFlags[y] |= ROW_DIRTY | ROW_HAS_HYPERLINK;
+          }
+        }
+      };
+      markRangeRows(this.previousHoveredLinkRange);
+      markRangeRows(this.hoveredLinkRange);
+      this.previousHoveredLinkRange = this.hoveredLinkRange;
+    }
+
+    const hoveredLink: HyperlinkRange | null =
+      this.hoveredHyperlinkId > 0 || this.hoveredLinkRange
+        ? { hyperlinkId: this.hoveredHyperlinkId, range: this.hoveredLinkRange }
+        : null;
+
+    const getGraphemeString = (viewportRow: number, col: number): string => {
+      if (!this.wasmTerm) return "";
+      if (viewportRow < 0 || viewportRow >= rows || col < 0 || col >= cols) return "";
+      if (viewportY > 0) {
+        if (viewportRow < viewportY) {
+          const scrollbackOffset = scrollbackLength - viewportY + viewportRow;
+          if (scrollbackOffset < 0 || scrollbackOffset >= scrollbackLength) return "";
+          return this.wasmTerm.getScrollbackGraphemeString(scrollbackOffset, col);
+        }
+        const screenRow = viewportRow - viewportY;
+        if (screenRow < 0 || screenRow >= rows) return "";
+        return this.wasmTerm.getGraphemeString(screenRow, col);
+      }
+      return this.wasmTerm.getGraphemeString(viewportRow, col);
+    };
+
+    return {
+      cols,
+      rows,
+      viewportCells,
+      rowFlags,
+      dirtyState,
+      selectionRange,
+      hoveredLink,
+      cursorX: cursor.x,
+      cursorY: cursor.y,
+      cursorVisible,
+      cursorStyle: this.options.cursorStyle,
+      getGraphemeString,
+      theme: this.resolvedTheme,
+      viewportY: rawViewportY,
+      scrollbackLength,
+      scrollbarOpacity,
+    };
+  }
+
+  private renderFrame(forceAll: boolean, scrollbarOpacity: number = this.scrollbarOpacity): number | null {
+    const input = this.buildRenderInput(forceAll, scrollbarOpacity);
+    if (!input || !this.renderer || !this.wasmTerm) return null;
+    this.renderer.render(input);
+    this.wasmTerm.clearDirty();
+    return input.cursorY;
+  }
+
   /**
    * Start the render loop
    */
@@ -1185,17 +1416,17 @@ export class Terminal implements ITerminalCore {
     const loop = () => {
       if (!this.isDisposed && this.isOpen) {
         // Render using WASM's native dirty tracking
-        // The render() method:
+        // renderFrame():
         // 1. Calls update() once to sync state and check dirty flags
-        // 2. Only redraws dirty rows when forceAll=false
-        // 3. Always calls clearDirty() at the end
-        this.renderer!.render(this.wasmTerm!, false, this.viewportY, this, this.scrollbarOpacity);
+        // 2. Builds RenderInput for the renderer
+        // 3. Calls clearDirty() after rendering
+        const forceAll = this.forceFullRender;
+        this.forceFullRender = false;
+        const cursorY = this.renderFrame(forceAll);
 
         // Check for cursor movement (Phase 2: onCursorMove event)
-        // Note: getCursor() reads from already-updated render state (from render() above)
-        const cursor = this.wasmTerm!.getCursor();
-        if (cursor.y !== this.lastCursorY) {
-          this.lastCursorY = cursor.y;
+        if (cursorY !== null && cursorY !== this.lastCursorY) {
+          this.lastCursorY = cursorY;
           this.cursorMoveEmitter.fire();
         }
 
@@ -1263,22 +1494,22 @@ export class Terminal implements ITerminalCore {
 
     // Remove event listeners
     if (this.element) {
-      this.element.removeEventListener('wheel', this.handleWheel);
-      this.element.removeEventListener('mousedown', this.handleMouseDown, { capture: true });
-      this.element.removeEventListener('mousemove', this.handleMouseMove);
-      this.element.removeEventListener('mouseleave', this.handleMouseLeave);
-      this.element.removeEventListener('click', this.handleClick);
+      this.element.removeEventListener("wheel", this.handleWheel);
+      this.element.removeEventListener("mousedown", this.handleMouseDown, { capture: true });
+      this.element.removeEventListener("mousemove", this.handleMouseMove);
+      this.element.removeEventListener("mouseleave", this.handleMouseLeave);
+      this.element.removeEventListener("click", this.handleClick);
 
       // Remove contenteditable and accessibility attributes added in open()
-      this.element.removeAttribute('contenteditable');
-      this.element.removeAttribute('role');
-      this.element.removeAttribute('aria-label');
-      this.element.removeAttribute('aria-multiline');
+      this.element.removeAttribute("contenteditable");
+      this.element.removeAttribute("role");
+      this.element.removeAttribute("aria-label");
+      this.element.removeAttribute("aria-multiline");
     }
 
     // Remove document-level listeners (only if opened)
-    if (this.isOpen && typeof document !== 'undefined') {
-      document.removeEventListener('mouseup', this.handleMouseUp);
+    if (this.isOpen && typeof document !== "undefined") {
+      document.removeEventListener("mouseup", this.handleMouseUp);
     }
 
     // Clean up scrollbar timers
@@ -1310,10 +1541,10 @@ export class Terminal implements ITerminalCore {
    */
   private assertOpen(): void {
     if (this.isDisposed) {
-      throw new Error('Terminal has been disposed');
+      throw new Error("Terminal has been disposed");
     }
     if (!this.isOpen) {
-      throw new Error('Terminal must be opened before use. Call terminal.open(parent) first.');
+      throw new Error("Terminal must be opened before use. Call terminal.open(parent) first.");
     }
   }
 
@@ -1395,12 +1626,8 @@ export class Terminal implements ITerminalCore {
     }
 
     // Update renderer for underline rendering
-    const previousHyperlinkId = (this.renderer as any).hoveredHyperlinkId || 0;
-    if (hyperlinkId !== previousHyperlinkId) {
-      this.renderer.setHoveredHyperlinkId(hyperlinkId);
-
-      // The 60fps render loop will pick up the change automatically
-      // No need to force a render - this keeps performance smooth
+    if (hyperlinkId !== this.hoveredHyperlinkId) {
+      this.hoveredHyperlinkId = hyperlinkId;
     }
 
     // Check if there's a link at this position (for click handling and cursor)
@@ -1445,41 +1672,33 @@ export class Terminal implements ITerminalCore {
 
           // Update cursor style
           if (this.element) {
-            this.element.style.cursor = link ? 'pointer' : 'text';
+            this.element.style.cursor = link ? "pointer" : "text";
           }
 
-          // Update renderer for underline (for regex URLs without hyperlink_id)
-          if (this.renderer) {
-            if (link) {
-              // Convert buffer coordinates to viewport coordinates
-              const scrollbackLength = this.wasmTerm?.getScrollbackLength() || 0;
+          if (link) {
+            const scrollbackLength = this.wasmTerm?.getScrollbackLength() || 0;
+            const rawViewportYForLinks = this.getViewportY();
+            const viewportYForLinks = Math.max(0, Math.floor(rawViewportYForLinks));
+            const startViewportY = link.range.start.y - scrollbackLength + viewportYForLinks;
+            const endViewportY = link.range.end.y - scrollbackLength + viewportYForLinks;
 
-              // Calculate viewport Y for start and end positions
-              // Use floored viewportY so overlay rows match renderer & selection
-              const rawViewportYForLinks = this.getViewportY();
-              const viewportYForLinks = Math.max(0, Math.floor(rawViewportYForLinks));
-              const startViewportY = link.range.start.y - scrollbackLength + viewportYForLinks;
-              const endViewportY = link.range.end.y - scrollbackLength + viewportYForLinks;
-
-              // Only show underline if link is visible in viewport
-              if (startViewportY < this.rows && endViewportY >= 0) {
-                this.renderer.setHoveredLinkRange({
-                  startX: link.range.start.x,
-                  startY: Math.max(0, startViewportY),
-                  endX: link.range.end.x,
-                  endY: Math.min(this.rows - 1, endViewportY),
-                });
-              } else {
-                this.renderer.setHoveredLinkRange(null);
-              }
+            if (startViewportY < this.rows && endViewportY >= 0) {
+              this.hoveredLinkRange = {
+                startX: link.range.start.x,
+                startY: Math.max(0, startViewportY),
+                endX: link.range.end.x,
+                endY: Math.min(this.rows - 1, endViewportY),
+              };
             } else {
-              this.renderer.setHoveredLinkRange(null);
+              this.hoveredLinkRange = null;
             }
+          } else {
+            this.hoveredLinkRange = null;
           }
         }
       })
       .catch((err) => {
-        console.warn('Link detection error:', err);
+        console.warn("Link detection error:", err);
       });
   }
 
@@ -1488,15 +1707,9 @@ export class Terminal implements ITerminalCore {
    */
   private handleMouseLeave = (): void => {
     // Clear hyperlink underline
-    if (this.renderer && this.wasmTerm) {
-      const previousHyperlinkId = (this.renderer as any).hoveredHyperlinkId || 0;
-      if (previousHyperlinkId > 0) {
-        this.renderer.setHoveredHyperlinkId(0);
-
-        // The 60fps render loop will pick up the change automatically
-      }
-      // Clear regex link underline
-      this.renderer.setHoveredLinkRange(null);
+    if (this.wasmTerm) {
+      this.hoveredHyperlinkId = 0;
+      this.hoveredLinkRange = null;
     }
 
     if (this.currentHoveredLink) {
@@ -1508,7 +1721,7 @@ export class Terminal implements ITerminalCore {
 
       // Reset cursor
       if (this.element) {
-        this.element.style.cursor = 'text';
+        this.element.style.cursor = "text";
       }
     }
   };
@@ -1618,14 +1831,14 @@ export class Terminal implements ITerminalCore {
       // Alternate screen: send arrow keys to the application
       // Applications like vim handle scrolling internally
       // Standard: ~3 arrow presses per wheel "click"
-      const direction = e.deltaY > 0 ? 'down' : 'up';
+      const direction = e.deltaY > 0 ? "down" : "up";
       const count = Math.min(Math.abs(Math.round(e.deltaY / 33)), 5); // Cap at 5
 
       for (let i = 0; i < count; i++) {
-        if (direction === 'up') {
-          this.dataEmitter.fire('\x1B[A'); // Up arrow
+        if (direction === "up") {
+          this.dataEmitter.fire("\x1B[A"); // Up arrow
         } else {
-          this.dataEmitter.fire('\x1B[B'); // Down arrow
+          this.dataEmitter.fire("\x1B[B"); // Down arrow
         }
       }
     } else {
@@ -1705,8 +1918,8 @@ export class Terminal implements ITerminalCore {
 
         // Prevent text selection during drag
         if (this.canvas) {
-          this.canvas.style.userSelect = 'none';
-          this.canvas.style.webkitUserSelect = 'none';
+          this.canvas.style.userSelect = "none";
+          this.canvas.style.webkitUserSelect = "none";
         }
       } else {
         // Click on track - jump to position
@@ -1728,8 +1941,8 @@ export class Terminal implements ITerminalCore {
 
       // Restore text selection
       if (this.canvas) {
-        this.canvas.style.userSelect = '';
-        this.canvas.style.webkitUserSelect = '';
+        this.canvas.style.userSelect = "";
+        this.canvas.style.webkitUserSelect = "";
       }
 
       // Schedule auto-hide after drag ends
@@ -1827,7 +2040,7 @@ export class Terminal implements ITerminalCore {
 
       // Trigger render to show updated opacity
       if (this.renderer && this.wasmTerm) {
-        this.renderer.render(this.wasmTerm, false, this.viewportY, this, this.scrollbarOpacity);
+        this.renderFrame(false, this.scrollbarOpacity);
       }
 
       if (progress < 1) {
@@ -1850,7 +2063,7 @@ export class Terminal implements ITerminalCore {
 
       // Trigger render to show updated opacity
       if (this.renderer && this.wasmTerm) {
-        this.renderer.render(this.wasmTerm, false, this.viewportY, this, this.scrollbarOpacity);
+        this.renderFrame(false, this.scrollbarOpacity);
       }
 
       if (progress < 1) {
@@ -1860,7 +2073,7 @@ export class Terminal implements ITerminalCore {
         this.scrollbarOpacity = 0;
         // Final render to clear scrollbar completely
         if (this.renderer && this.wasmTerm) {
-          this.renderer.render(this.wasmTerm, false, this.viewportY, this, 0);
+          this.renderFrame(false, 0);
         }
       }
     };
@@ -1912,7 +2125,7 @@ export class Terminal implements ITerminalCore {
       const pt = match[2];
 
       // OSC 0 and OSC 2 set the title
-      if (ps === '0' || ps === '2') {
+      if (ps === "0" || ps === "2") {
         if (pt !== this.currentTitle) {
           this.currentTitle = pt;
           this.titleChangeEmitter.fire(pt);

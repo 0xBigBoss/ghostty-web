@@ -12,7 +12,7 @@
       }
 
       body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
         min-height: 100vh;
         display: flex;
@@ -131,8 +131,8 @@
     </div>
 
     <script type="module">
-      import { init, Terminal } from '../lib/index.ts';
-      import { FitAddon } from '../lib/addons/fit.ts';
+      import { init, Terminal } from "../lib/index.ts";
+      import { FitAddon } from "../lib/addons/fit.ts";
 
       let term;
       let ws;
@@ -147,8 +147,8 @@
           fontSize: 14,
           fontFamily: 'Monaco, Menlo, "Courier New", monospace',
           theme: {
-            background: '#1e1e1e',
-            foreground: '#d4d4d4',
+            background: "#1e1e1e",
+            foreground: "#d4d4d4",
           },
           scrollback: 10000,
         });
@@ -156,12 +156,12 @@
         fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
 
-        term.open(document.getElementById('terminal-container'));
+        term.open(document.getElementById("terminal-container"));
         fitAddon.fit();
         fitAddon.observeResize(); // Auto-fit when container resizes
 
         // Handle window resize (for browsers that don't trigger ResizeObserver on window resize)
-        window.addEventListener('resize', () => {
+        window.addEventListener("resize", () => {
           fitAddon.fit();
         });
 
@@ -169,7 +169,7 @@
         term.onResize((size) => {
           if (ws && ws.readyState === WebSocket.OPEN) {
             // Send resize as control sequence (server expects this format)
-            ws.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
+            ws.send(JSON.stringify({ type: "resize", cols: size.cols, rows: size.rows }));
           }
         });
 
@@ -181,24 +181,24 @@
         });
 
         // Debug scrollback
-        console.log('Terminal scrollback:', term.buffer?.scrollback?.length || 'N/A');
+        console.log("Terminal scrollback:", term.buffer?.scrollback?.length || "N/A");
         term.onScroll((ydisp) => {
-          console.log('Scroll position:', ydisp);
+          console.log("Scroll position:", ydisp);
         });
 
         // Connect to PTY server - terminal is ready immediately after open()
-        console.log('[Demo] Terminal ready, connecting with size:', term.cols, 'x', term.rows);
+        console.log("[Demo] Terminal ready, connecting with size:", term.cols, "x", term.rows);
         connectWebSocket();
       }
 
       function connectWebSocket() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         const wsUrl = `${protocol}//${window.location.host}/ws?cols=${term.cols}&rows=${term.rows}`;
 
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
-          console.log('WebSocket connected');
+          console.log("WebSocket connected");
           updateConnectionStatus(true);
         };
 
@@ -208,12 +208,12 @@
         };
 
         ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
+          console.error("WebSocket error:", error);
           updateConnectionStatus(false);
         };
 
         ws.onclose = () => {
-          console.log('WebSocket disconnected');
+          console.log("WebSocket disconnected");
           updateConnectionStatus(false);
 
           // Attempt to reconnect after 3 seconds
@@ -226,15 +226,15 @@
       }
 
       function updateConnectionStatus(connected) {
-        const dot = document.getElementById('connection-dot');
-        const text = document.getElementById('connection-text');
+        const dot = document.getElementById("connection-dot");
+        const text = document.getElementById("connection-text");
 
         if (connected) {
-          dot.classList.add('connected');
-          text.textContent = 'Connected';
+          dot.classList.add("connected");
+          text.textContent = "Connected";
         } else {
-          dot.classList.remove('connected');
-          text.textContent = 'Disconnected';
+          dot.classList.remove("connected");
+          text.textContent = "Disconnected";
         }
       }
 

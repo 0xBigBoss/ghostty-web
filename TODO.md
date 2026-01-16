@@ -1,6 +1,7 @@
 # TODO - Fix Resize Race Condition
 
 ## Completed
+
 - [x] Analyzed race condition between render loop and resize (iteration 1)
 - [x] Implemented fix: pause render loop during resize by canceling animationFrameId before WASM resize and restarting after (iteration 1)
 - [x] Type check passes (`npx tsc --noEmit`)
@@ -16,15 +17,19 @@
 - [x] Verification passes: type check, 322 tests, build all succeed (iteration 3)
 
 ## In Progress
+
 (none)
 
 ## Pending
+
 - [ ] Manual verification: Build ghostty-terminal extension and test resize during cmatrix (requires user interaction)
 
 ## Blocked
+
 - Manual verification cannot be performed in automated loop - requires user to test in VS Code Extension Development Host
 
 ## Notes
+
 - The race condition occurred because the render loop (running at 60fps via requestAnimationFrame) would read from WASM buffers while resize() was reallocating them
 - First fix (pause render loop) was necessary but not sufficient
 - Second fix (invalidate graphemeBuffer) addressed cached TypedArray views becoming detached

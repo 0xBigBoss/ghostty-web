@@ -6,7 +6,7 @@
  * since the same hyperlink_id always represents the same link.
  */
 
-import type { IBufferCellPosition, ILink, ILinkProvider } from './types';
+import type { IBufferCellPosition, ILink, ILinkProvider } from "./types";
 
 /**
  * Manages link detection across multiple providers with intelligent caching

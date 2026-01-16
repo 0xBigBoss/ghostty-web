@@ -21,7 +21,7 @@ import {
   type RenderStateColors,
   type RenderStateCursor,
   type TerminalHandle,
-} from './types';
+} from "./types";
 
 // Re-export types for convenience
 export {
@@ -55,7 +55,7 @@ export class Ghostty {
   createTerminal(
     cols: number = 80,
     rows: number = 24,
-    config?: GhosttyTerminalConfig
+    config?: GhosttyTerminalConfig,
   ): GhosttyTerminal {
     return new GhosttyTerminal(this.exports, this.memory, cols, rows, config);
   }
@@ -67,13 +67,13 @@ export class Ghostty {
     }
 
     // Resolve path relative to this module
-    const moduleUrl = new URL('../ghostty-vt.wasm', import.meta.url);
+    const moduleUrl = new URL("../ghostty-vt.wasm", import.meta.url);
 
     // Build paths to try, prioritizing file system paths for Node/Bun
     const defaultPaths: string[] = [];
 
     // For Node/Bun: try absolute file path first (strip file:// protocol)
-    if (moduleUrl.protocol === 'file:') {
+    if (moduleUrl.protocol === "file:") {
       let filePath = moduleUrl.pathname;
       // Remove leading slash on Windows paths (e.g., /C:/ -> C:/)
       if (filePath.match(/^\/[A-Za-z]:\//)) {
@@ -83,7 +83,7 @@ export class Ghostty {
     }
 
     // Also try other common paths
-    defaultPaths.push(moduleUrl.href, './ghostty-vt.wasm', '/ghostty-vt.wasm');
+    defaultPaths.push(moduleUrl.href, "./ghostty-vt.wasm", "/ghostty-vt.wasm");
 
     let lastError: Error | null = null;
     for (const path of defaultPaths) {
@@ -93,14 +93,14 @@ export class Ghostty {
         lastError = e instanceof Error ? e : new Error(String(e));
       }
     }
-    throw lastError || new Error('Failed to load Ghostty WASM');
+    throw lastError || new Error("Failed to load Ghostty WASM");
   }
 
   private static async loadFromPath(path: string): Promise<Ghostty> {
     let wasmBytes: ArrayBuffer | undefined;
 
     // Try Bun.file first (for Bun environments)
-    if (typeof Bun !== 'undefined' && typeof Bun.file === 'function') {
+    if (typeof Bun !== "undefined" && typeof Bun.file === "function") {
       try {
         const file = Bun.file(path);
         if (await file.exists()) {
@@ -114,7 +114,7 @@ export class Ghostty {
     // Try Node.js fs module if Bun.file didn't work
     if (!wasmBytes) {
       try {
-        const fs = await import('fs/promises');
+        const fs = await import("fs/promises");
         const buffer = await fs.readFile(path);
         wasmBytes = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
       } catch {
@@ -145,9 +145,9 @@ export class Ghostty {
           const bytes = new Uint8Array(
             (wasmInstance.exports as GhosttyWasmExports).memory.buffer,
             ptr,
-            len
+            len,
           );
-          console.log('[ghostty-vt]', new TextDecoder().decode(bytes));
+          console.log("[ghostty-vt]", new TextDecoder().decode(bytes));
         },
       },
     });
@@ -175,7 +175,7 @@ export class KeyEncoder {
   setOption(option: KeyEncoderOption, value: boolean | number): void {
     const valuePtr = this.exports.ghostty_wasm_alloc_u8();
     const view = new DataView(this.exports.memory.buffer);
-    view.setUint8(valuePtr, typeof value === 'boolean' ? (value ? 1 : 0) : value);
+    view.setUint8(valuePtr, typeof value === "boolean" ? (value ? 1 : 0) : value);
     this.exports.ghostty_key_encoder_setopt(this.encoder, option, valuePtr);
     this.exports.ghostty_wasm_free_u8(valuePtr);
   }
@@ -215,7 +215,7 @@ export class KeyEncoder {
       eventPtr,
       bufPtr,
       bufferSize,
-      writtenPtr
+      writtenPtr,
     );
 
     if (encodeResult !== 0) {
@@ -273,7 +273,7 @@ export class GhosttyTerminal {
     memory: WebAssembly.Memory,
     cols: number = 80,
     rows: number = 24,
-    config?: GhosttyTerminalConfig
+    config?: GhosttyTerminalConfig,
   ) {
     this.exports = exports;
     this.memory = memory;
@@ -284,7 +284,7 @@ export class GhosttyTerminal {
       // Allocate config struct in WASM memory
       const configPtr = this.exports.ghostty_wasm_alloc_u8_array(GHOSTTY_CONFIG_SIZE);
       if (configPtr === 0) {
-        throw new Error('Failed to allocate config (out of memory)');
+        throw new Error("Failed to allocate config (out of memory)");
       }
 
       try {
@@ -323,7 +323,7 @@ export class GhosttyTerminal {
       this.handle = this.exports.ghostty_terminal_new(cols, rows);
     }
 
-    if (!this.handle) throw new Error('Failed to create terminal');
+    if (!this.handle) throw new Error("Failed to create terminal");
 
     this.initCellPool();
   }
@@ -340,7 +340,7 @@ export class GhosttyTerminal {
   // ==========================================================================
 
   write(data: string | Uint8Array): void {
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
     const ptr = this.exports.ghostty_wasm_alloc_u8_array(bytes.length);
     new Uint8Array(this.memory.buffer).set(bytes, ptr);
     this.exports.ghostty_terminal_write(this.handle, ptr, bytes.length);
@@ -390,9 +390,15 @@ export class GhosttyTerminal {
    * Ensures render state is fresh by calling update().
    */
   getCursor(): RenderStateCursor {
-    // Call update() to ensure render state is fresh.
-    // This is safe to call multiple times - dirty state persists until markClean().
     this.update();
+    return this.getCursorFromState();
+  }
+
+  /**
+   * Get cursor state from the current render state without calling update().
+   * Caller must ensure update() has been called for fresh state.
+   */
+  getCursorFromState(): RenderStateCursor {
     return {
       x: this.exports.ghostty_render_state_get_cursor_x(this.handle),
       y: this.exports.ghostty_render_state_get_cursor_y(this.handle),
@@ -400,7 +406,7 @@ export class GhosttyTerminal {
       viewportY: this.exports.ghostty_render_state_get_cursor_y(this.handle),
       visible: this.exports.ghostty_render_state_get_cursor_visible(this.handle),
       blinking: false, // TODO: Add blinking support
-      style: 'block', // TODO: Add style support
+      style: "block", // TODO: Add style support
     };
   }
 
@@ -460,7 +466,7 @@ export class GhosttyTerminal {
     const count = this.exports.ghostty_render_state_get_viewport(
       this.handle,
       this.viewportBufferPtr,
-      totalCells
+      totalCells,
     );
 
     if (count < 0) return this.cellPool;
@@ -569,7 +575,7 @@ export class GhosttyTerminal {
       this.handle,
       offset,
       this.viewportBufferPtr,
-      this._cols
+      this._cols,
     );
 
     if (count < 0) return null;
@@ -722,7 +728,7 @@ export class GhosttyTerminal {
       row,
       col,
       this.graphemeBufferPtr,
-      16
+      16,
     );
 
     if (count < 0) return null;
@@ -738,7 +744,7 @@ export class GhosttyTerminal {
    */
   getGraphemeString(row: number, col: number): string {
     const codepoints = this.getGrapheme(row, col);
-    if (!codepoints || codepoints.length === 0) return ' ';
+    if (!codepoints || codepoints.length === 0) return " ";
     return String.fromCodePoint(...codepoints);
   }
 
@@ -760,7 +766,7 @@ export class GhosttyTerminal {
       offset,
       col,
       this.graphemeBufferPtr,
-      16
+      16,
     );
 
     if (count < 0) return null;
@@ -775,7 +781,7 @@ export class GhosttyTerminal {
    */
   getScrollbackGraphemeString(offset: number, col: number): string {
     const codepoints = this.getScrollbackGrapheme(offset, col);
-    if (!codepoints || codepoints.length === 0) return ' ';
+    if (!codepoints || codepoints.length === 0) return " ";
     return String.fromCodePoint(...codepoints);
   }
 

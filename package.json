@@ -2,6 +2,35 @@
   "name": "@0xbigboss/ghostty-web",
   "version": "0.4.0",
   "description": "Web-based terminal emulator using Ghostty's VT100 parser via WebAssembly. Fork with enhanced selection handling.",
+  "keywords": [
+    "ansi",
+    "ghostty",
+    "terminal",
+    "terminal-emulator",
+    "tty",
+    "vscode",
+    "vt100",
+    "wasm",
+    "web",
+    "webassembly",
+    "xterm"
+  ],
+  "homepage": "https://github.com/0xBigBoss/ghostty-web#readme",
+  "bugs": "https://github.com/0xBigBoss/ghostty-web/issues",
+  "license": "MIT",
+  "author": "0xBigBoss",
+  "contributors": [
+    "Coder (https://github.com/coder)"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xBigBoss/ghostty-web.git"
+  },
+  "files": [
+    "dist",
+    "ghostty-vt.wasm",
+    "README.md"
+  ],
   "type": "module",
   "main": "./dist/ghostty-web.umd.cjs",
   "module": "./dist/ghostty-web.js",
@@ -14,35 +43,6 @@
     },
     "./ghostty-vt.wasm": "./ghostty-vt.wasm"
   },
-  "files": [
-    "dist",
-    "ghostty-vt.wasm",
-    "README.md"
-  ],
-  "keywords": [
-    "terminal",
-    "terminal-emulator",
-    "ghostty",
-    "web",
-    "xterm",
-    "vt100",
-    "wasm",
-    "webassembly",
-    "ansi",
-    "tty",
-    "vscode"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/0xBigBoss/ghostty-web.git"
-  },
-  "bugs": "https://github.com/0xBigBoss/ghostty-web/issues",
-  "homepage": "https://github.com/0xBigBoss/ghostty-web#readme",
-  "license": "MIT",
-  "author": "0xBigBoss",
-  "contributors": [
-    "Coder (https://github.com/coder)"
-  ],
   "publishConfig": {
     "access": "public"
   },
