@@ -37,7 +37,7 @@ git apply ../patches/ghostty-wasm-api.patch
 
 # Build WASM
 echo "⚙️  Building WASM (takes ~20 seconds)..."
-zig build lib-vt -Dtarget=wasm32-freestanding -Doptimize=ReleaseSmall
+zig build lib-vt -Dtarget=wasm32-freestanding -Dcpu=baseline+simd128+bulk_memory+relaxed_simd -Doptimize=ReleaseFast
 
 # Copy to project root
 cd ..

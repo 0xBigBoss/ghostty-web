@@ -34,17 +34,37 @@ import type {
 import { LinkDetector } from "./link-detector";
 import { OSC8LinkProvider } from "./providers/osc8-link-provider";
 import { UrlRegexProvider } from "./providers/url-regex-provider";
+import { profileDuration, profileEvent, profileStart } from "./profile";
+import { renderScheduler } from "./render-scheduler";
 import { CanvasRenderer } from "./renderer";
 import type { HyperlinkRange, LinkRange, RenderInput, Renderer } from "./renderer-types";
-import {
-  ROW_DIRTY,
-  ROW_HAS_HYPERLINK,
-  ROW_HAS_SELECTION,
-} from "./renderer-types";
+import { ROW_DIRTY, ROW_HAS_HYPERLINK, ROW_HAS_SELECTION } from "./renderer-types";
 import { SelectionManager } from "./selection-manager";
 import { resolveTheme } from "./theme";
 import type { ILink, ILinkProvider } from "./types";
 import { DirtyState } from "./types";
+
+type RenderRequestReason =
+  | "open"
+  | "write"
+  | "resize"
+  | "option:cursor"
+  | "option:theme"
+  | "option:font"
+  | "selection-change"
+  | "scroll:lines"
+  | "scroll:top"
+  | "scroll:bottom"
+  | "scroll:line"
+  | "scroll:smooth"
+  | "scrollbar:fade"
+  | "hover:hyperlink"
+  | "hover:link-range"
+  | "hover:leave"
+  | "animation"
+  | "cursor:blink"
+  | "resume"
+  | "unknown";
 
 // ============================================================================
 // Terminal Class
@@ -121,7 +141,12 @@ export class Terminal implements ITerminalCore {
   // Lifecycle state
   private isOpen = false;
   private isDisposed = false;
-  private animationFrameId?: number;
+  private renderScheduleId?: number;
+  private isRenderPaused = false;
+  private renderPending = false;
+  private blinkTimeoutId?: number;
+  private renderRequestReasons = new Set<RenderRequestReason>();
+  private renderForceAllReasons = new Set<RenderRequestReason>();
 
   // Resize protection: queue writes during resize to prevent race conditions
   private _isResizing = false;
@@ -141,8 +166,6 @@ export class Terminal implements ITerminalCore {
   public viewportY: number = 0; // Top line of viewport in scrollback buffer (0 = at bottom, can be fractional during smooth scroll)
   private targetViewportY: number = 0; // Target viewport position for smooth scrolling
   private scrollAnimationStartTime?: number;
-  private scrollAnimationStartY?: number;
-  private scrollAnimationFrame?: number;
   private customWheelEventHandler?: (event: WheelEvent) => boolean;
   private linkClickHandler?: (url: string, event: MouseEvent) => boolean;
   private lastCursorY: number = 0; // Track cursor position for onCursorMove
@@ -158,18 +181,31 @@ export class Terminal implements ITerminalCore {
   private scrollbarHideTimeout?: number;
   private readonly SCROLLBAR_HIDE_DELAY_MS = 1500; // Hide after 1.5 seconds
   private readonly SCROLLBAR_FADE_DURATION_MS = 200; // 200ms fade animation
+  private readonly CURSOR_BLINK_INTERVAL_MS = 530;
   private resolvedTheme = resolveTheme();
   private rowFlags = new Uint8Array(0);
   private composedViewportCells: GhosttyCell[] = [];
+  private renderInput?: RenderInput;
+  private renderInputViewportY = 0;
+  private renderInputScrollbackLength = 0;
+  private renderInputCols = 0;
+  private renderInputRows = 0;
   private lastViewportYForRender: number = 0;
   private lastCursorPosition: { x: number; y: number } = { x: 0, y: 0 };
   private lastCursorVisible: boolean = true;
+  private lastCursorBlinkActive: boolean = false;
   private lastBlinkVisible: boolean = true;
+  private lastDirtyState: DirtyState | null = null;
+  private lastDirtyReasonKey: string | null = null;
   private hoveredHyperlinkId: number = 0;
   private hoveredLinkRange: LinkRange | null = null;
   private previousHoveredHyperlinkId: number = 0;
   private previousHoveredLinkRange: LinkRange | null = null;
+  private hoveredLinkState: HyperlinkRange | null = null;
   private forceFullRender: boolean = false;
+  private scrollbarFadeStartTime?: number;
+  private scrollbarFadeStartOpacity = 0;
+  private scrollbarFadeTargetOpacity = 0;
 
   constructor(options: ITerminalOptions = {}) {
     // Use provided Ghostty instance (for test isolation) or get module-level instance
@@ -238,6 +274,7 @@ export class Terminal implements ITerminalCore {
       case "cursorBlink":
       case "cursorStyle":
         this.forceFullRender = true;
+        this.requestRender(true, "option:cursor");
         break;
 
       case "theme":
@@ -246,6 +283,7 @@ export class Terminal implements ITerminalCore {
           this.renderer.updateTheme(this.resolvedTheme);
         }
         this.forceFullRender = true;
+        this.requestRender(true, "option:theme");
         break;
 
       case "fontSize":
@@ -284,6 +322,7 @@ export class Terminal implements ITerminalCore {
 
     this.renderer.resize(this.cols, this.rows);
     this.forceFullRender = true;
+    this.requestRender(true, "option:font");
   }
 
   /**
@@ -496,6 +535,7 @@ export class Terminal implements ITerminalCore {
       // Forward selection change events
       this.selectionManager.onSelectionChange(() => {
         this.selectionChangeEmitter.fire();
+        this.requestRender(false, "selection-change");
       });
 
       // Setup paste event handler on textarea
@@ -533,10 +573,7 @@ export class Terminal implements ITerminalCore {
       parent.addEventListener("wheel", this.handleWheel, { passive: false, capture: true });
 
       // Render initial blank screen (force full redraw)
-      this.renderFrame(true, this.scrollbarOpacity);
-
-      // Start render loop
-      this.startRenderLoop();
+      this.requestRender(true, "open");
 
       // Focus input (auto-focus so user can start typing immediately)
       this.focus();
@@ -580,11 +617,19 @@ export class Terminal implements ITerminalCore {
     // like clicking or typing, not by incoming data.
 
     // Write directly to WASM terminal (handles VT parsing internally)
+    const writeStart = profileStart();
     this.wasmTerm!.write(data);
+    const bytes = typeof data === "string" ? data.length : data.byteLength;
+    profileDuration("bootty:term:write", writeStart, {
+      bytes,
+      kind: typeof data === "string" ? "string" : "bytes",
+    });
 
     // Process any responses generated by the terminal (e.g., DSR cursor position)
     // These need to be sent back to the PTY via onData
+    const responseStart = profileStart();
     this.processTerminalResponses();
+    profileDuration("bootty:term:responses", responseStart);
 
     // Check for bell character (BEL, \x07)
     // WASM doesn't expose bell events, so we detect it in the data stream
@@ -614,7 +659,8 @@ export class Terminal implements ITerminalCore {
       requestAnimationFrame(callback);
     }
 
-    // Render will happen on next animation frame
+    // Render on next animation frame
+    this.requestRender(false, "write");
   }
 
   /**
@@ -704,11 +750,7 @@ export class Terminal implements ITerminalCore {
     // Pause render loop during resize to prevent race condition.
     // The render loop reads from WASM buffers that are reallocated during resize.
     // Without this, concurrent access can cause SIGSEGV crashes.
-    const wasRunning = this.animationFrameId !== undefined;
-    if (this.animationFrameId) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = undefined;
-    }
+    this.cancelRenderSchedule();
 
     try {
       // Resize WASM terminal (this reallocates internal buffers)
@@ -725,15 +767,10 @@ export class Terminal implements ITerminalCore {
       this.resizeEmitter.fire({ cols, rows });
 
       // Force full render with new dimensions
-      this.renderFrame(true, this.scrollbarOpacity);
+      this.requestRender(true, "resize");
     } catch (err) {
       console.error("[ghostty-web] Resize error:", err);
       // Still clear the flag so future resizes can proceed
-    }
-
-    // Restart render loop if it was running
-    if (wasRunning) {
-      this.startRenderLoop();
     }
 
     // Clear resizing flag and flush queued writes after a frame
@@ -968,12 +1005,14 @@ export class Terminal implements ITerminalCore {
 
     if (newViewportY !== this.viewportY) {
       this.viewportY = newViewportY;
+      this.scrollAnimationStartTime = undefined;
       this.scrollEmitter.fire(this.viewportY);
 
       // Show scrollbar when scrolling (with auto-hide)
       if (scrollbackLength > 0) {
         this.showScrollbar();
       }
+      this.requestRender(false, "scroll:lines");
     }
   }
 
@@ -992,8 +1031,10 @@ export class Terminal implements ITerminalCore {
     const scrollbackLength = this.getScrollbackLength();
     if (scrollbackLength > 0 && this.viewportY !== scrollbackLength) {
       this.viewportY = scrollbackLength;
+      this.scrollAnimationStartTime = undefined;
       this.scrollEmitter.fire(this.viewportY);
       this.showScrollbar();
+      this.requestRender(false, "scroll:top");
     }
   }
 
@@ -1003,11 +1044,13 @@ export class Terminal implements ITerminalCore {
   public scrollToBottom(): void {
     if (this.viewportY !== 0) {
       this.viewportY = 0;
+      this.scrollAnimationStartTime = undefined;
       this.scrollEmitter.fire(this.viewportY);
       // Show scrollbar briefly when scrolling to bottom
       if (this.getScrollbackLength() > 0) {
         this.showScrollbar();
       }
+      this.requestRender(false, "scroll:bottom");
     }
   }
 
@@ -1021,12 +1064,14 @@ export class Terminal implements ITerminalCore {
 
     if (newViewportY !== this.viewportY) {
       this.viewportY = newViewportY;
+      this.scrollAnimationStartTime = undefined;
       this.scrollEmitter.fire(this.viewportY);
 
       // Show scrollbar when scrolling to specific line
       if (scrollbackLength > 0) {
         this.showScrollbar();
       }
+      this.requestRender(false, "scroll:line");
     }
   }
 
@@ -1048,11 +1093,13 @@ export class Terminal implements ITerminalCore {
     if (duration === 0) {
       this.viewportY = newTarget;
       this.targetViewportY = newTarget;
+      this.scrollAnimationStartTime = undefined;
       this.scrollEmitter.fire(Math.floor(this.viewportY));
 
       if (scrollbackLength > 0) {
         this.showScrollbar();
       }
+      this.requestRender(false, "scroll:smooth");
       return;
     }
 
@@ -1062,23 +1109,21 @@ export class Terminal implements ITerminalCore {
     // If animation is already running, don't restart it
     // Just let it continue toward the updated target
     // This prevents choppy restarts during continuous scrolling
-    if (this.scrollAnimationFrame) {
-      return;
+    if (this.scrollAnimationStartTime === undefined) {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      this.scrollAnimationStartTime = now;
     }
 
-    // Start new animation
-    this.scrollAnimationStartTime = Date.now();
-    this.scrollAnimationStartY = this.viewportY;
-    this.animateScroll();
+    this.requestRender(false, "scroll:smooth");
   }
 
   /**
    * Animation loop for smooth scrolling
    * Uses asymptotic approach - moves a fraction of remaining distance each frame
    */
-  private animateScroll = (): void => {
+  private advanceSmoothScroll(): boolean {
     if (!this.wasmTerm || this.scrollAnimationStartTime === undefined) {
-      return;
+      return false;
     }
 
     const duration = this.options.smoothScrollDuration ?? 100;
@@ -1098,10 +1143,8 @@ export class Terminal implements ITerminalCore {
       }
 
       // Animation complete
-      this.scrollAnimationFrame = undefined;
       this.scrollAnimationStartTime = undefined;
-      this.scrollAnimationStartY = undefined;
-      return;
+      return false;
     }
 
     // Move a fraction of the remaining distance
@@ -1121,9 +1164,8 @@ export class Terminal implements ITerminalCore {
       this.showScrollbar();
     }
 
-    // Continue animation
-    this.scrollAnimationFrame = requestAnimationFrame(this.animateScroll);
-  };
+    return true;
+  }
 
   // ==========================================================================
   // Lifecycle
@@ -1141,16 +1183,15 @@ export class Terminal implements ITerminalCore {
     this.isOpen = false;
 
     // Stop render loop
-    if (this.animationFrameId) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = undefined;
+    this.cancelRenderSchedule();
+    if (this.blinkTimeoutId) {
+      clearTimeout(this.blinkTimeoutId);
+      this.blinkTimeoutId = undefined;
     }
 
     // Stop smooth scroll animation
-    if (this.scrollAnimationFrame) {
-      cancelAnimationFrame(this.scrollAnimationFrame);
-      this.scrollAnimationFrame = undefined;
-    }
+    this.scrollAnimationStartTime = undefined;
+    this.scrollbarFadeStartTime = undefined;
 
     // Cancel pending resize flush and clear write queue
     if (this._resizeFlushFrameId) {
@@ -1205,6 +1246,26 @@ export class Terminal implements ITerminalCore {
     return a.startX === b.startX && a.startY === b.startY && a.endX === b.endX && a.endY === b.endY;
   }
 
+  private getGraphemeString = (viewportRow: number, col: number): string => {
+    if (!this.wasmTerm) return "";
+    const cols = this.renderInputCols;
+    const rows = this.renderInputRows;
+    const viewportY = this.renderInputViewportY;
+    const scrollbackLength = this.renderInputScrollbackLength;
+    if (viewportRow < 0 || viewportRow >= rows || col < 0 || col >= cols) return "";
+    if (viewportY > 0) {
+      if (viewportRow < viewportY) {
+        const scrollbackOffset = scrollbackLength - viewportY + viewportRow;
+        if (scrollbackOffset < 0 || scrollbackOffset >= scrollbackLength) return "";
+        return this.wasmTerm.getScrollbackGraphemeString(scrollbackOffset, col);
+      }
+      const screenRow = viewportRow - viewportY;
+      if (screenRow < 0 || screenRow >= rows) return "";
+      return this.wasmTerm.getGraphemeString(screenRow, col);
+    }
+    return this.wasmTerm.getGraphemeString(viewportRow, col);
+  };
+
   private composeViewportCells(
     viewportY: number,
     cols: number,
@@ -1255,17 +1316,47 @@ export class Terminal implements ITerminalCore {
 
   private buildRenderInput(forceAll: boolean, scrollbarOpacity: number): RenderInput | null {
     if (!this.renderer || !this.wasmTerm) return null;
+    const buildStart = profileStart();
 
     const cols = this.cols;
     const rows = this.rows;
     const rawViewportY = this.getViewportY();
     const viewportY = Math.max(0, Math.floor(rawViewportY));
 
-    let dirtyState = this.wasmTerm.update();
-    if (forceAll || viewportY > 0 || viewportY !== this.lastViewportYForRender) {
+    const wasmDirtyState = this.wasmTerm.update();
+    const dirtyReasonBits = this.wasmTerm.getDirtyReasons();
+    const dirtyReasons: string[] = [];
+    if (wasmDirtyState === DirtyState.FULL) {
+      dirtyReasons.push("wasm");
+    } else if (wasmDirtyState === DirtyState.PARTIAL) {
+      dirtyReasons.push("wasm-partial");
+    }
+    const viewportChanged = viewportY > 0 || viewportY !== this.lastViewportYForRender;
+    if (forceAll) {
+      dirtyReasons.push("forceAll");
+    }
+    if (viewportChanged) {
+      dirtyReasons.push("viewport");
+    }
+
+    let dirtyState = wasmDirtyState;
+    if (forceAll || viewportChanged) {
       dirtyState = DirtyState.FULL;
     }
     this.lastViewportYForRender = viewportY;
+    const dirtyReasonKey = dirtyReasons.join("|") || "none";
+    if (dirtyState !== this.lastDirtyState || dirtyReasonKey !== this.lastDirtyReasonKey) {
+      profileEvent("bootty:dirty-state", {
+        dirtyState,
+        wasmDirtyState,
+        reasons: dirtyReasonKey,
+        dirtyReasonBits,
+        forceAll,
+        viewportY,
+      });
+      this.lastDirtyState = dirtyState;
+      this.lastDirtyReasonKey = dirtyReasonKey;
+    }
 
     const scrollbackLength = this.wasmTerm.getScrollbackLength();
     const viewportCells = this.composeViewportCells(viewportY, cols, rows, scrollbackLength);
@@ -1306,7 +1397,8 @@ export class Terminal implements ITerminalCore {
     const cursor = this.wasmTerm.getCursorFromState();
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
     const blinkVisible =
-      !this.options.cursorBlink || Math.floor(now / 530) % 2 === 0;
+      !this.options.cursorBlink || Math.floor(now / this.CURSOR_BLINK_INTERVAL_MS) % 2 === 0;
+    const cursorBlinkActive = this.options.cursorBlink && cursor.visible && viewportY === 0;
     const cursorVisible = cursor.visible && viewportY === 0 && blinkVisible;
     const cursorMoved =
       cursor.x !== this.lastCursorPosition.x || cursor.y !== this.lastCursorPosition.y;
@@ -1324,6 +1416,7 @@ export class Terminal implements ITerminalCore {
     }
     this.lastCursorPosition = { x: cursor.x, y: cursor.y };
     this.lastCursorVisible = cursorVisible;
+    this.lastCursorBlinkActive = cursorBlinkActive;
     this.lastBlinkVisible = blinkVisible;
 
     const hyperlinkChanged = this.hoveredHyperlinkId !== this.previousHoveredHyperlinkId;
@@ -1360,84 +1453,260 @@ export class Terminal implements ITerminalCore {
       this.previousHoveredLinkRange = this.hoveredLinkRange;
     }
 
-    const hoveredLink: HyperlinkRange | null =
-      this.hoveredHyperlinkId > 0 || this.hoveredLinkRange
-        ? { hyperlinkId: this.hoveredHyperlinkId, range: this.hoveredLinkRange }
-        : null;
-
-    const getGraphemeString = (viewportRow: number, col: number): string => {
-      if (!this.wasmTerm) return "";
-      if (viewportRow < 0 || viewportRow >= rows || col < 0 || col >= cols) return "";
-      if (viewportY > 0) {
-        if (viewportRow < viewportY) {
-          const scrollbackOffset = scrollbackLength - viewportY + viewportRow;
-          if (scrollbackOffset < 0 || scrollbackOffset >= scrollbackLength) return "";
-          return this.wasmTerm.getScrollbackGraphemeString(scrollbackOffset, col);
-        }
-        const screenRow = viewportRow - viewportY;
-        if (screenRow < 0 || screenRow >= rows) return "";
-        return this.wasmTerm.getGraphemeString(screenRow, col);
+    let hoveredLink: HyperlinkRange | null = null;
+    if (this.hoveredHyperlinkId > 0 || this.hoveredLinkRange) {
+      if (!this.hoveredLinkState) {
+        this.hoveredLinkState = { hyperlinkId: 0, range: null };
       }
-      return this.wasmTerm.getGraphemeString(viewportRow, col);
-    };
+      this.hoveredLinkState.hyperlinkId = this.hoveredHyperlinkId;
+      this.hoveredLinkState.range = this.hoveredLinkRange;
+      hoveredLink = this.hoveredLinkState;
+    } else if (this.hoveredLinkState) {
+      this.hoveredLinkState.hyperlinkId = 0;
+      this.hoveredLinkState.range = null;
+    }
 
-    return {
+    this.renderInputViewportY = viewportY;
+    this.renderInputScrollbackLength = scrollbackLength;
+    this.renderInputCols = cols;
+    this.renderInputRows = rows;
+
+    const input: RenderInput =
+      this.renderInput ??
+      (this.renderInput = {
+        cols,
+        rows,
+        viewportCells,
+        rowFlags,
+        dirtyState,
+        selectionRange,
+        hoveredLink,
+        cursorX: cursor.x,
+        cursorY: cursor.y,
+        cursorVisible,
+        cursorStyle: this.options.cursorStyle,
+        getGraphemeString: this.getGraphemeString,
+        theme: this.resolvedTheme,
+        viewportY: rawViewportY,
+        scrollbackLength,
+        scrollbarOpacity,
+      });
+
+    input.cols = cols;
+    input.rows = rows;
+    input.viewportCells = viewportCells;
+    input.rowFlags = rowFlags;
+    input.dirtyState = dirtyState;
+    input.selectionRange = selectionRange;
+    input.hoveredLink = hoveredLink;
+    input.cursorX = cursor.x;
+    input.cursorY = cursor.y;
+    input.cursorVisible = cursorVisible;
+    input.cursorStyle = this.options.cursorStyle;
+    input.theme = this.resolvedTheme;
+    input.viewportY = rawViewportY;
+    input.scrollbackLength = scrollbackLength;
+    input.scrollbarOpacity = scrollbarOpacity;
+
+    let dirtyRows = 0;
+    let selectionRows = 0;
+    let hyperlinkRows = 0;
+    for (let y = 0; y < rows; y++) {
+      const flags = rowFlags[y];
+      if (flags & ROW_DIRTY) dirtyRows++;
+      if (flags & ROW_HAS_SELECTION) selectionRows++;
+      if (flags & ROW_HAS_HYPERLINK) hyperlinkRows++;
+    }
+
+    profileDuration("bootty:render:build-input", buildStart, {
       cols,
       rows,
-      viewportCells,
-      rowFlags,
       dirtyState,
-      selectionRange,
-      hoveredLink,
-      cursorX: cursor.x,
-      cursorY: cursor.y,
-      cursorVisible,
-      cursorStyle: this.options.cursorStyle,
-      getGraphemeString,
-      theme: this.resolvedTheme,
-      viewportY: rawViewportY,
+      wasmDirtyState,
+      dirtyReasons: dirtyReasonKey,
+      dirtyReasonBits,
+      dirtyRows,
+      selectionRows,
+      hyperlinkRows,
+      viewportY,
       scrollbackLength,
-      scrollbarOpacity,
-    };
+      forceAll,
+    });
+
+    return input;
   }
 
-  private renderFrame(forceAll: boolean, scrollbarOpacity: number = this.scrollbarOpacity): number | null {
+  private renderFrame(
+    forceAll: boolean,
+    scrollbarOpacity: number = this.scrollbarOpacity,
+  ): number | null {
+    if (this.isRenderPaused) return null;
+    const frameStart = profileStart();
     const input = this.buildRenderInput(forceAll, scrollbarOpacity);
     if (!input || !this.renderer || !this.wasmTerm) return null;
     this.renderer.render(input);
     this.wasmTerm.clearDirty();
+    profileDuration("bootty:render:frame", frameStart, {
+      cols: input.cols,
+      rows: input.rows,
+      dirtyState: input.dirtyState,
+      scrollbarOpacity,
+    });
     return input.cursorY;
   }
 
   /**
-   * Start the render loop
+   * Pause rendering (stops the rAF loop and ignores explicit render requests).
+   * Used by host UIs to avoid rendering hidden terminals.
    */
-  private startRenderLoop(): void {
-    const loop = () => {
-      if (!this.isDisposed && this.isOpen) {
-        // Render using WASM's native dirty tracking
-        // renderFrame():
-        // 1. Calls update() once to sync state and check dirty flags
-        // 2. Builds RenderInput for the renderer
-        // 3. Calls clearDirty() after rendering
-        const forceAll = this.forceFullRender;
-        this.forceFullRender = false;
-        const cursorY = this.renderFrame(forceAll);
+  public pauseRendering(): void {
+    if (this.isRenderPaused || this.isDisposed || !this.isOpen) {
+      return;
+    }
+    this.isRenderPaused = true;
+    this.cancelRenderSchedule();
+    if (this.blinkTimeoutId) {
+      clearTimeout(this.blinkTimeoutId);
+      this.blinkTimeoutId = undefined;
+    }
+  }
 
-        // Check for cursor movement (Phase 2: onCursorMove event)
-        if (cursorY !== null && cursorY !== this.lastCursorY) {
-          this.lastCursorY = cursorY;
-          this.cursorMoveEmitter.fire();
-        }
+  /**
+   * Resume rendering after a pause.
+   */
+  public resumeRendering(): void {
+    if (!this.isRenderPaused || this.isDisposed || !this.isOpen) {
+      return;
+    }
+    this.isRenderPaused = false;
+    this.forceFullRender = true;
+    this.requestRender(true, "resume");
+  }
 
-        // Note: onRender event is intentionally not fired in the render loop
-        // to avoid performance issues. For now, consumers can use requestAnimationFrame
-        // if they need frame-by-frame updates.
-
-        this.animationFrameId = requestAnimationFrame(loop);
+  /**
+   * Schedule a render on the next animation frame.
+   * Coalesces multiple requests into a single rAF.
+   */
+  private requestRender(forceAll: boolean = false, reason: RenderRequestReason = "unknown"): void {
+    if (forceAll) {
+      this.forceFullRender = true;
+    }
+    if (this.isRenderPaused || this.isDisposed || !this.isOpen) {
+      return;
+    }
+    this.renderRequestReasons.add(reason);
+    if (forceAll) {
+      this.renderForceAllReasons.add(reason);
+    }
+    if (this.renderPending) {
+      return;
+    }
+    const reasonsSnapshot = [...this.renderRequestReasons];
+    const forceAllReasonsSnapshot = [...this.renderForceAllReasons];
+    profileEvent("bootty:render:request", {
+      forceAll,
+      reason,
+      reasons: reasonsSnapshot.join(","),
+      forceAllReasons: forceAllReasonsSnapshot.join(","),
+      reasonsCount: reasonsSnapshot.length,
+      forceAllReasonsCount: forceAllReasonsSnapshot.length,
+    });
+    this.renderPending = true;
+    const scheduledAt = profileStart();
+    this.renderScheduleId = renderScheduler.schedule((now) => {
+      this.renderScheduleId = undefined;
+      this.renderPending = false;
+      const reasons = [...this.renderRequestReasons];
+      const forceAllReasons = [...this.renderForceAllReasons];
+      this.renderRequestReasons.clear();
+      this.renderForceAllReasons.clear();
+      if (this.isDisposed || !this.isOpen || this.isRenderPaused) {
+        return;
       }
-    };
-    loop();
+      if (scheduledAt !== null) {
+        profileEvent("bootty:render:raf-fired", {
+          delayMs: now - scheduledAt,
+          reasons: reasons.join(","),
+          forceAllReasons: forceAllReasons.join(","),
+          reasonsCount: reasons.length,
+          forceAllReasonsCount: forceAllReasons.length,
+        });
+      }
+
+      const needsAnimationFrame = this.advanceAnimations(now);
+      const forceAllNow = this.forceFullRender;
+      this.forceFullRender = false;
+      const cursorY = this.renderFrame(forceAllNow);
+
+      // Check for cursor movement (Phase 2: onCursorMove event)
+      if (cursorY !== null && cursorY !== this.lastCursorY) {
+        this.lastCursorY = cursorY;
+        this.cursorMoveEmitter.fire();
+      }
+
+      // Continue animating if needed; otherwise schedule blink updates.
+      if (needsAnimationFrame) {
+        this.requestRender(false, "animation");
+        return;
+      }
+      if (cursorY !== null) {
+        this.scheduleBlinkIfNeeded(now);
+      }
+    }, scheduledAt);
+  }
+
+  private cancelRenderSchedule(): void {
+    if (this.renderScheduleId !== undefined) {
+      renderScheduler.cancel(this.renderScheduleId);
+      this.renderScheduleId = undefined;
+    }
+    this.renderPending = false;
+  }
+
+  private advanceAnimations(now: number): boolean {
+    const smoothScrollActive = this.advanceSmoothScroll();
+    const scrollbarFadeActive = this.advanceScrollbarFade(now);
+    return smoothScrollActive || scrollbarFadeActive;
+  }
+
+  private advanceScrollbarFade(now: number): boolean {
+    if (this.scrollbarFadeStartTime === undefined) {
+      return false;
+    }
+    const elapsed = now - this.scrollbarFadeStartTime;
+    const progress = Math.min(elapsed / this.SCROLLBAR_FADE_DURATION_MS, 1);
+    const start = this.scrollbarFadeStartOpacity;
+    const target = this.scrollbarFadeTargetOpacity;
+    this.scrollbarOpacity = start + (target - start) * progress;
+
+    if (progress < 1) {
+      return true;
+    }
+
+    this.scrollbarFadeStartTime = undefined;
+    this.scrollbarOpacity = target <= 0 ? 0 : 1;
+    this.scrollbarVisible = target > 0;
+    return false;
+  }
+
+  private scheduleBlinkIfNeeded(now: number): void {
+    if (this.blinkTimeoutId) {
+      clearTimeout(this.blinkTimeoutId);
+      this.blinkTimeoutId = undefined;
+    }
+    if (this.isRenderPaused || this.isDisposed || !this.isOpen) {
+      return;
+    }
+    if (!this.lastCursorBlinkActive) {
+      return;
+    }
+    const nextToggle =
+      (Math.floor(now / this.CURSOR_BLINK_INTERVAL_MS) + 1) * this.CURSOR_BLINK_INTERVAL_MS;
+    const delay = Math.max(1, nextToggle - now);
+    this.blinkTimeoutId = window.setTimeout(() => {
+      this.blinkTimeoutId = undefined;
+      this.requestRender(false, "cursor:blink");
+    }, delay);
   }
 
   /**
@@ -1628,6 +1897,7 @@ export class Terminal implements ITerminalCore {
     // Update renderer for underline rendering
     if (hyperlinkId !== this.hoveredHyperlinkId) {
       this.hoveredHyperlinkId = hyperlinkId;
+      this.requestRender(false, "hover:hyperlink");
     }
 
     // Check if there's a link at this position (for click handling and cursor)
@@ -1659,6 +1929,7 @@ export class Terminal implements ITerminalCore {
     this.linkDetector
       .getLinkAt(x, bufferRow)
       .then((link) => {
+        let renderNeeded = false;
         // Update hover state for cursor changes and click handling
         if (link !== this.currentHoveredLink) {
           // Notify old link we're leaving
@@ -1666,6 +1937,7 @@ export class Terminal implements ITerminalCore {
 
           // Update current link
           this.currentHoveredLink = link;
+          renderNeeded = true;
 
           // Notify new link we're entering
           link?.hover?.(true);
@@ -1683,18 +1955,31 @@ export class Terminal implements ITerminalCore {
             const endViewportY = link.range.end.y - scrollbackLength + viewportYForLinks;
 
             if (startViewportY < this.rows && endViewportY >= 0) {
-              this.hoveredLinkRange = {
+              const nextRange: LinkRange = {
                 startX: link.range.start.x,
                 startY: Math.max(0, startViewportY),
                 endX: link.range.end.x,
                 endY: Math.min(this.rows - 1, endViewportY),
               };
+              if (!this.rangesEqual(this.hoveredLinkRange, nextRange)) {
+                this.hoveredLinkRange = nextRange;
+                renderNeeded = true;
+              }
             } else {
-              this.hoveredLinkRange = null;
+              if (this.hoveredLinkRange) {
+                this.hoveredLinkRange = null;
+                renderNeeded = true;
+              }
             }
           } else {
-            this.hoveredLinkRange = null;
+            if (this.hoveredLinkRange) {
+              this.hoveredLinkRange = null;
+              renderNeeded = true;
+            }
           }
+        }
+        if (renderNeeded) {
+          this.requestRender(false, "hover:link-range");
         }
       })
       .catch((err) => {
@@ -1708,8 +1993,11 @@ export class Terminal implements ITerminalCore {
   private handleMouseLeave = (): void => {
     // Clear hyperlink underline
     if (this.wasmTerm) {
-      this.hoveredHyperlinkId = 0;
-      this.hoveredLinkRange = null;
+      if (this.hoveredHyperlinkId !== 0 || this.hoveredLinkRange) {
+        this.hoveredHyperlinkId = 0;
+        this.hoveredLinkRange = null;
+        this.requestRender(false, "hover:leave");
+      }
     }
 
     if (this.currentHoveredLink) {
@@ -1989,6 +2277,21 @@ export class Terminal implements ITerminalCore {
   /**
    * Show scrollbar with fade-in and schedule auto-hide
    */
+  private startScrollbarFade(targetOpacity: number): void {
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (
+      this.scrollbarFadeStartTime !== undefined &&
+      this.scrollbarFadeTargetOpacity === targetOpacity
+    ) {
+      return;
+    }
+
+    this.scrollbarFadeStartTime = now;
+    this.scrollbarFadeStartOpacity = this.scrollbarOpacity;
+    this.scrollbarFadeTargetOpacity = targetOpacity;
+    this.requestRender(false, "scrollbar:fade");
+  }
+
   private showScrollbar(): void {
     // Clear any existing hide timeout
     if (this.scrollbarHideTimeout) {
@@ -1999,11 +2302,10 @@ export class Terminal implements ITerminalCore {
     // If not visible, start fade-in
     if (!this.scrollbarVisible) {
       this.scrollbarVisible = true;
-      this.scrollbarOpacity = 0;
-      this.fadeInScrollbar();
-    } else {
-      // Already visible, just ensure it's fully opaque
-      this.scrollbarOpacity = 1;
+      this.startScrollbarFade(1);
+    } else if (this.scrollbarOpacity < 1) {
+      // Visible but not fully opaque
+      this.startScrollbarFade(1);
     }
 
     // Schedule auto-hide (unless dragging)
@@ -2024,60 +2326,8 @@ export class Terminal implements ITerminalCore {
     }
 
     if (this.scrollbarVisible) {
-      this.fadeOutScrollbar();
+      this.startScrollbarFade(0);
     }
-  }
-
-  /**
-   * Fade in scrollbar
-   */
-  private fadeInScrollbar(): void {
-    const startTime = Date.now();
-    const animate = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / this.SCROLLBAR_FADE_DURATION_MS, 1);
-      this.scrollbarOpacity = progress;
-
-      // Trigger render to show updated opacity
-      if (this.renderer && this.wasmTerm) {
-        this.renderFrame(false, this.scrollbarOpacity);
-      }
-
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      }
-    };
-    animate();
-  }
-
-  /**
-   * Fade out scrollbar
-   */
-  private fadeOutScrollbar(): void {
-    const startTime = Date.now();
-    const startOpacity = this.scrollbarOpacity;
-    const animate = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / this.SCROLLBAR_FADE_DURATION_MS, 1);
-      this.scrollbarOpacity = startOpacity * (1 - progress);
-
-      // Trigger render to show updated opacity
-      if (this.renderer && this.wasmTerm) {
-        this.renderFrame(false, this.scrollbarOpacity);
-      }
-
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      } else {
-        this.scrollbarVisible = false;
-        this.scrollbarOpacity = 0;
-        // Final render to clear scrollbar completely
-        if (this.renderer && this.wasmTerm) {
-          this.renderFrame(false, 0);
-        }
-      }
-    };
-    animate();
   }
 
   /**

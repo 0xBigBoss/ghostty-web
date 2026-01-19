@@ -22,6 +22,7 @@ import type {
 } from "./renderer-types";
 import { ROW_DIRTY, ROW_HAS_HYPERLINK, ROW_HAS_SELECTION } from "./renderer-types";
 import { CellFlags, DirtyState, type GhosttyCell } from "./types";
+import { profileDuration, profileStart } from "./profile";
 import { DEFAULT_THEME, rgbaToCss, resolveTheme } from "./theme";
 
 // ============================================================================
@@ -61,7 +62,10 @@ export class CanvasRenderer implements Renderer {
   private currentHoveredLink: HyperlinkRange | null = null;
   private currentGetGraphemeString?: (viewportRow: number, col: number) => string;
 
-  constructor(canvasOrOptions?: HTMLCanvasElement | RendererOptions, options: RendererOptions = {}) {
+  constructor(
+    canvasOrOptions?: HTMLCanvasElement | RendererOptions,
+    options: RendererOptions = {},
+  ) {
     let resolvedOptions = options;
     let canvas: HTMLCanvasElement | undefined;
     if (canvasOrOptions instanceof HTMLCanvasElement) {
@@ -200,6 +204,7 @@ export class CanvasRenderer implements Renderer {
    */
   public render(input: RenderInput): void {
     this.requireContext();
+    const renderStart = profileStart();
     this.theme = input.theme;
     this.currentSelectionRange = input.selectionRange;
     this.currentHoveredLink = input.hoveredLink;
@@ -210,6 +215,7 @@ export class CanvasRenderer implements Renderer {
     const forceAll = input.dirtyState === DirtyState.FULL;
     const rowsToRender = new Set<number>();
 
+    const buildRowsStart = profileStart();
     for (let y = 0; y < rows; y++) {
       const flags = input.rowFlags[y] ?? 0;
       const needsRender =
@@ -221,24 +227,50 @@ export class CanvasRenderer implements Renderer {
         if (y < rows - 1) rowsToRender.add(y + 1);
       }
     }
+    profileDuration("bootty:canvas:build-rows", buildRowsStart, {
+      cols,
+      rows,
+      rowsToRender: rowsToRender.size,
+      dirtyState: input.dirtyState,
+    });
 
+    const rowsStart = profileStart();
     for (let y = 0; y < rows; y++) {
       if (!rowsToRender.has(y)) continue;
       this.renderLine(input.viewportCells, y, cols);
     }
+    profileDuration("bootty:canvas:rows", rowsStart, {
+      cols,
+      rows,
+      rowsToRender: rowsToRender.size,
+      dirtyState: input.dirtyState,
+    });
 
     if (input.cursorVisible) {
+      const cursorStart = profileStart();
       this.renderCursor(input.cursorX, input.cursorY, input.cursorStyle);
+      profileDuration("bootty:canvas:cursor", cursorStart, {
+        cursorStyle: input.cursorStyle,
+      });
     }
 
     if (input.scrollbarOpacity > 0 && input.scrollbackLength > 0) {
-      this.renderScrollbar(
-        input.viewportY,
-        input.scrollbackLength,
-        rows,
-        input.scrollbarOpacity,
-      );
+      const scrollbarStart = profileStart();
+      this.renderScrollbar(input.viewportY, input.scrollbackLength, rows, input.scrollbarOpacity);
+      profileDuration("bootty:canvas:scrollbar", scrollbarStart, {
+        scrollbackLength: input.scrollbackLength,
+        scrollbarOpacity: input.scrollbarOpacity,
+      });
     }
+
+    profileDuration("bootty:canvas:render", renderStart, {
+      cols,
+      rows,
+      rowsToRender: rowsToRender.size,
+      dirtyState: input.dirtyState,
+      cursorVisible: input.cursorVisible,
+      scrollbarOpacity: input.scrollbarOpacity,
+    });
   }
 
   /**
@@ -530,7 +562,6 @@ export class CanvasRenderer implements Renderer {
     this.metrics = this.measureFont();
   }
 
-
   /**
    * Get current font metrics
    */
@@ -622,7 +653,6 @@ export class CanvasRenderer implements Renderer {
 
     return false;
   }
-
 
   /**
    * Get character cell width (for coordinate conversion)

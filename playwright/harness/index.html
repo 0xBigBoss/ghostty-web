@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval' 'unsafe-inline';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BooTTY Playwright Harness</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "debug": "/playwright/harness/debug-shim.js"
+        }
+      }
+    </script>
+    <style>
+      body {
+        margin: 0;
+        background: #0f0f0f;
+        color: #d4d4d4;
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+          monospace;
+      }
+      #terminal {
+        width: 100vw;
+        height: 100vh;
+      }
+      #ready {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        padding: 4px 8px;
+        font-size: 12px;
+        background: #1e1e1e;
+        border: 1px solid #333;
+        border-radius: 4px;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ready" data-testid="ready">ready</div>
+    <div id="terminal" data-testid="terminal"></div>
+    <script type="module">
+      import { Ghostty, Terminal } from "/dist/ghostty-web.js";
+
+      if (!window.acquireVsCodeApi) {
+        window.acquireVsCodeApi = () => ({
+          postMessage: () => {},
+          getState: () => undefined,
+          setState: () => {},
+        });
+      }
+
+      const readyEl = document.getElementById("ready");
+      const terminalEl = document.getElementById("terminal");
+      const rendererParam = new URLSearchParams(window.location.search).get("renderer") ?? "canvas";
+
+      function createPerfCollector() {
+        const events = [];
+        const hook = {
+          enabled: true,
+          record(event) {
+            if (!hook.enabled) return;
+            events.push(event);
+          },
+          now: () =>
+            typeof performance !== "undefined" && typeof performance.now === "function"
+              ? performance.now()
+              : Date.now(),
+        };
+
+        function summarizeEvents() {
+          const summary = {};
+          const durationsByName = {};
+          for (const event of events) {
+            const entry =
+              summary[event.name] ??
+              (summary[event.name] = {
+                count: 0,
+                withDuration: 0,
+                totalDuration: 0,
+                minDuration: null,
+                maxDuration: null,
+                p50: null,
+                p95: null,
+                p99: null,
+                avgDuration: null,
+                lastData: null,
+              });
+            entry.count += 1;
+            if (event.data) {
+              entry.lastData = event.data;
+            }
+            if (typeof event.dur === "number") {
+              entry.withDuration += 1;
+              entry.totalDuration += event.dur;
+              entry.minDuration =
+                entry.minDuration === null ? event.dur : Math.min(entry.minDuration, event.dur);
+              entry.maxDuration =
+                entry.maxDuration === null ? event.dur : Math.max(entry.maxDuration, event.dur);
+              (durationsByName[event.name] ??= []).push(event.dur);
+            }
+          }
+
+          for (const [name, entry] of Object.entries(summary)) {
+            const durations = durationsByName[name];
+            if (!durations || durations.length === 0) continue;
+            durations.sort((a, b) => a - b);
+            const pick = (quantile) => {
+              const idx = Math.max(0, Math.min(durations.length - 1, Math.floor(quantile)));
+              return durations[idx];
+            };
+            entry.p50 = pick(durations.length * 0.5);
+            entry.p95 = pick(durations.length * 0.95);
+            entry.p99 = pick(durations.length * 0.99);
+            entry.avgDuration = entry.totalDuration / entry.withDuration;
+          }
+
+          const timestamps = events
+            .map((event) => event.ts)
+            .filter((value) => typeof value === "number");
+          const startTs = timestamps.length > 0 ? Math.min(...timestamps) : null;
+          const endTs = timestamps.length > 0 ? Math.max(...timestamps) : null;
+
+          return {
+            totalEvents: events.length,
+            startTs,
+            endTs,
+            durationMs: startTs !== null && endTs !== null ? endTs - startTs : null,
+            events: summary,
+          };
+        }
+
+        return {
+          hook,
+          reset() {
+            events.length = 0;
+          },
+          setEnabled(enabled) {
+            hook.enabled = enabled;
+          },
+          getEvents(limit) {
+            if (typeof limit === "number") {
+              return events.slice(-limit);
+            }
+            return events.slice();
+          },
+          getSummary() {
+            return summarizeEvents();
+          },
+        };
+      }
+
+      async function init() {
+        try {
+          const perf = createPerfCollector();
+          window.__BOOTTY_PROFILE__ = perf.hook;
+
+          const ghostty = await Ghostty.load("/dist/ghostty-vt.wasm");
+          let renderer;
+          if (rendererParam === "webgl") {
+            const module = await import("/libghostty-webgl/dist/index.js");
+            renderer = new module.WebGLRenderer();
+          } else if (rendererParam !== "canvas") {
+            throw new Error(`Unknown renderer: ${rendererParam}`);
+          }
+          const terminal = new Terminal({ ghostty, cols: 80, rows: 24, renderer });
+          terminal.open(terminalEl);
+
+          globalThis.__boottyHarness = {
+            terminal,
+            ghostty,
+            rendererKind: rendererParam,
+            async write(data) {
+              terminal.write(data);
+              await new Promise((resolve) =>
+                requestAnimationFrame(() => requestAnimationFrame(resolve)),
+              );
+            },
+            async writeChunks(chunks, options = {}) {
+              const rafDelay =
+                typeof options.rafDelay === "number" ? Math.max(0, options.rafDelay) : 2;
+              const chunkDelayMs =
+                typeof options.chunkDelayMs === "number" ? Math.max(0, options.chunkDelayMs) : 0;
+              const yieldEvery =
+                typeof options.yieldEvery === "number" ? Math.max(1, options.yieldEvery) : 1;
+
+              for (let i = 0; i < chunks.length; i += 1) {
+                terminal.write(chunks[i]);
+                for (let r = 0; r < rafDelay; r += 1) {
+                  await new Promise((resolve) => requestAnimationFrame(resolve));
+                }
+                if (chunkDelayMs > 0) {
+                  await new Promise((resolve) => setTimeout(resolve, chunkDelayMs));
+                }
+                if ((i + 1) % yieldEvery === 0) {
+                  await Promise.resolve();
+                }
+              }
+            },
+            resize(cols, rows) {
+              terminal.resize(cols, rows);
+            },
+            resetPerf() {
+              perf.reset();
+            },
+            setPerfEnabled(enabled) {
+              perf.setEnabled(enabled);
+            },
+            getPerf(options = {}) {
+              const summary = perf.getSummary();
+              if (options.includeEvents) {
+                const limit = typeof options.limit === "number" ? Number(options.limit) : undefined;
+                return { summary, events: perf.getEvents(limit) };
+              }
+              return { summary };
+            },
+            getScrollbackLength() {
+              return terminal.wasmTerm?.getScrollbackLength?.() ?? 0;
+            },
+            readViewportLine(row) {
+              const line = terminal.buffer.active.getLine(row);
+              return line ? line.translateToString(true) : "";
+            },
+            readBufferLines(limit = 200) {
+              const buffer = terminal.buffer.active;
+              const total = buffer.length;
+              const start = Math.max(0, total - limit);
+              const lines = [];
+              for (let i = start; i < total; i += 1) {
+                const line = buffer.getLine(i);
+                lines.push(line ? line.translateToString(true) : "");
+              }
+              return lines;
+            },
+            getSize() {
+              return { cols: terminal.cols, rows: terminal.rows };
+            },
+            readCell(row, col) {
+              const line = terminal.wasmTerm?.getLine?.(row);
+              const cell = line?.[col];
+              if (!cell) return null;
+              return {
+                codepoint: cell.codepoint,
+                char: cell.codepoint ? String.fromCodePoint(cell.codepoint) : "",
+                fg: { r: cell.fg_r, g: cell.fg_g, b: cell.fg_b },
+                bg: { r: cell.bg_r, g: cell.bg_g, b: cell.bg_b },
+                flags: cell.flags,
+                width: cell.width,
+                hyperlinkId: cell.hyperlink_id,
+                graphemeLen: cell.grapheme_len,
+              };
+            },
+            readLineCells(row, limit = terminal.cols) {
+              const line = terminal.wasmTerm?.getLine?.(row);
+              if (!line) return [];
+              const slice = line.slice(0, Math.min(limit, line.length));
+              return slice.map((cell) => ({
+                codepoint: cell.codepoint,
+                char: cell.codepoint ? String.fromCodePoint(cell.codepoint) : "",
+                fg: { r: cell.fg_r, g: cell.fg_g, b: cell.fg_b },
+                bg: { r: cell.bg_r, g: cell.bg_g, b: cell.bg_b },
+                flags: cell.flags,
+                width: cell.width,
+                hyperlinkId: cell.hyperlink_id,
+                graphemeLen: cell.grapheme_len,
+              }));
+            },
+            dispose() {
+              terminal.dispose();
+            },
+          };
+
+          readyEl.textContent = `ready (${rendererParam})`;
+          readyEl.dataset.status = "ready";
+          readyEl.style.display = "inline-block";
+        } catch (err) {
+          globalThis.__boottyHarnessError = err;
+          const message = err instanceof Error ? err.message : String(err);
+          readyEl.textContent = `error: ${message}`;
+          readyEl.dataset.status = "error";
+          readyEl.style.display = "inline-block";
+          console.error(err);
+        }
+      }
+
+      init();
+    </script>
+  </body>
+</html>

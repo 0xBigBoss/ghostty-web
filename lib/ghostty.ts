@@ -97,7 +97,7 @@ export class Ghostty {
   }
 
   private static async loadFromPath(path: string): Promise<Ghostty> {
-    let wasmBytes: ArrayBuffer | undefined;
+    let wasmBytes: ArrayBuffer | SharedArrayBuffer | undefined;
 
     // Try Bun.file first (for Bun environments)
     if (typeof Bun !== "undefined" && typeof Bun.file === "function") {
@@ -254,9 +254,13 @@ export class KeyEncoder {
 export class GhosttyTerminal {
   private exports: GhosttyWasmExports;
   private memory: WebAssembly.Memory;
+  private memoryView: Uint8Array;
   private handle: TerminalHandle;
   private _cols: number;
   private _rows: number;
+  private writeBufferPtr = 0;
+  private writeBufferSize = 0;
+  private readonly textEncoder = new TextEncoder();
 
   /** Size of GhosttyCell in WASM (16 bytes) */
   private static readonly CELL_SIZE = 16;
@@ -277,6 +281,7 @@ export class GhosttyTerminal {
   ) {
     this.exports = exports;
     this.memory = memory;
+    this.memoryView = new Uint8Array(this.memory.buffer);
     this._cols = cols;
     this._rows = rows;
 
@@ -340,11 +345,11 @@ export class GhosttyTerminal {
   // ==========================================================================
 
   write(data: string | Uint8Array): void {
-    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-    const ptr = this.exports.ghostty_wasm_alloc_u8_array(bytes.length);
-    new Uint8Array(this.memory.buffer).set(bytes, ptr);
+    const bytes = typeof data === "string" ? this.textEncoder.encode(data) : data;
+    if (bytes.length === 0) return;
+    const ptr = this.ensureWriteBuffer(bytes.length);
+    this.getMemoryView().set(bytes, ptr);
     this.exports.ghostty_terminal_write(this.handle, ptr, bytes.length);
-    this.exports.ghostty_wasm_free_u8_array(ptr, bytes.length);
   }
 
   resize(cols: number, rows: number): void {
@@ -357,6 +362,11 @@ export class GhosttyTerminal {
   }
 
   free(): void {
+    if (this.writeBufferPtr) {
+      this.exports.ghostty_wasm_free_u8_array(this.writeBufferPtr, this.writeBufferSize);
+      this.writeBufferPtr = 0;
+      this.writeBufferSize = 0;
+    }
     if (this.viewportBufferPtr) {
       this.exports.ghostty_wasm_free_u8_array(this.viewportBufferPtr, this.viewportBufferSize);
       this.viewportBufferPtr = 0;
@@ -367,6 +377,29 @@ export class GhosttyTerminal {
   // ==========================================================================
   // RenderState API - The key performance optimization
   // ==========================================================================
+
+  private ensureWriteBuffer(size: number): number {
+    if (this.writeBufferPtr && size <= this.writeBufferSize) {
+      return this.writeBufferPtr;
+    }
+    if (this.writeBufferPtr) {
+      this.exports.ghostty_wasm_free_u8_array(this.writeBufferPtr, this.writeBufferSize);
+    }
+    this.writeBufferPtr = this.exports.ghostty_wasm_alloc_u8_array(size);
+    if (this.writeBufferPtr === 0) {
+      this.writeBufferSize = 0;
+      throw new Error("Failed to allocate write buffer (out of memory)");
+    }
+    this.writeBufferSize = size;
+    return this.writeBufferPtr;
+  }
+
+  private getMemoryView(): Uint8Array {
+    if (this.memoryView.buffer !== this.memory.buffer) {
+      this.memoryView = new Uint8Array(this.memory.buffer);
+    }
+    return this.memoryView;
+  }
 
   /**
    * Update render state from terminal.
@@ -383,6 +416,13 @@ export class GhosttyTerminal {
    */
   update(): DirtyState {
     return this.exports.ghostty_render_state_update(this.handle) as DirtyState;
+  }
+
+  /**
+   * Get dirty reason bitmask from the last render state update.
+   */
+  getDirtyReasons(): number {
+    return this.exports.ghostty_render_state_get_dirty_reasons(this.handle);
   }
 
   /**

@@ -416,6 +416,7 @@ export interface GhosttyWasmExports extends WebAssembly.Exports {
 
   // RenderState API - high-performance rendering (ONE call gets ALL data)
   ghostty_render_state_update(terminal: TerminalHandle): number; // 0=none, 1=partial, 2=full
+  ghostty_render_state_get_dirty_reasons(terminal: TerminalHandle): number; // bitmask
   ghostty_render_state_get_cols(terminal: TerminalHandle): number;
   ghostty_render_state_get_rows(terminal: TerminalHandle): number;
   ghostty_render_state_get_cursor_x(terminal: TerminalHandle): number;

@@ -1,6 +1,8 @@
 import type { ITheme } from "./interfaces";
 import type { RGBA, TerminalTheme } from "./renderer-types";
 
+const DEFAULT_SELECTION_OPACITY = 0.4;
+
 export const DEFAULT_THEME: Required<ITheme> = {
   foreground: "#d4d4d4",
   background: "#1e1e1e",
@@ -8,6 +10,7 @@ export const DEFAULT_THEME: Required<ITheme> = {
   cursorAccent: "#1e1e1e",
   selectionBackground: "#d4d4d4",
   selectionForeground: "#1e1e1e",
+  selectionOpacity: DEFAULT_SELECTION_OPACITY,
   black: "#000000",
   red: "#cd3131",
   green: "#0dbc79",
@@ -25,8 +28,6 @@ export const DEFAULT_THEME: Required<ITheme> = {
   brightCyan: "#29b8db",
   brightWhite: "#ffffff",
 };
-
-const DEFAULT_SELECTION_OPACITY = 0.4;
 
 export function resolveTheme(theme?: ITheme): TerminalTheme {
   const merged = { ...DEFAULT_THEME, ...(theme ?? {}) };
