@@ -57,4 +57,20 @@ test.describe("BooTTY terminal behavior", () => {
     expect(after.cols).toBe(100);
     expect(after.rows).toBe(30);
   });
+
+  test("handles burst SGR output without stalling", async ({ page }) => {
+    const burstLines = Array.from({ length: 80 }, (_, i) => {
+      const index = String(i + 1).padStart(3, "0");
+      return `\x1b[32mB-${index}\x1b[0m`;
+    });
+    const burst = burstLines.join("\r\n");
+
+    await page.evaluate(async (payload) => {
+      const h = (globalThis as any).__boottyHarness;
+      await h.write(`${payload}\r\nBURST_DONE\r\n`);
+    }, burst);
+
+    const lines = await page.evaluate(() => (globalThis as any).__boottyHarness.readBufferLines());
+    expect(lines.join("\n")).toContain("BURST_DONE");
+  });
 });

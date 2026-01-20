@@ -534,14 +534,12 @@ index 03a883e20..aae897154 100644
          // On Wasm we need to export our allocator convenience functions.
          if (builtin.target.cpu.arch.isWasm()) {
 diff --git a/src/quirks.zig b/src/quirks.zig
-index 5129923d2..fbb5389dc 100644
+index 8e639bbf0..fbb5389dc 100644
 --- a/src/quirks.zig
 +++ b/src/quirks.zig
-@@ -7,8 +7,12 @@
- //! [1]: https://github.com/WebKit/WebKit/blob/main/Source/WebCore/page/Quirks.cpp
- 
+@@ -8,7 +8,10 @@
  const std = @import("std");
-+const builtin = @import("builtin");
+ const builtin = @import("builtin");
  
 -const font = @import("font/main.zig");
 +const font = if (builtin.target.cpu.arch.isWasm())
