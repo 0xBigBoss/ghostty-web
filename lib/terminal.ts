@@ -197,6 +197,7 @@ export class Terminal implements ITerminalCore {
   private lastBlinkVisible: boolean = true;
   private lastDirtyState: DirtyState | null = null;
   private lastDirtyReasonKey: string | null = null;
+  private pendingWriteSinceRender: boolean = false;
   private hoveredHyperlinkId: number = 0;
   private hoveredLinkRange: LinkRange | null = null;
   private previousHoveredHyperlinkId: number = 0;
@@ -618,6 +619,9 @@ export class Terminal implements ITerminalCore {
 
     // Write directly to WASM terminal (handles VT parsing internally)
     const writeStart = profileStart();
+    if (typeof data === "string" ? data.length > 0 : data.byteLength > 0) {
+      this.pendingWriteSinceRender = true;
+    }
     this.wasmTerm!.write(data);
     const bytes = typeof data === "string" ? data.length : data.byteLength;
     profileDuration("bootty:term:write", writeStart, {
@@ -1322,6 +1326,8 @@ export class Terminal implements ITerminalCore {
     const rows = this.rows;
     const rawViewportY = this.getViewportY();
     const viewportY = Math.max(0, Math.floor(rawViewportY));
+    const hadPendingWrite = this.pendingWriteSinceRender;
+    this.pendingWriteSinceRender = false;
 
     const wasmDirtyState = this.wasmTerm.update();
     const dirtyReasonBits = this.wasmTerm.getDirtyReasons();
@@ -1343,20 +1349,11 @@ export class Terminal implements ITerminalCore {
     if (forceAll || viewportChanged) {
       dirtyState = DirtyState.FULL;
     }
-    this.lastViewportYForRender = viewportY;
-    const dirtyReasonKey = dirtyReasons.join("|") || "none";
-    if (dirtyState !== this.lastDirtyState || dirtyReasonKey !== this.lastDirtyReasonKey) {
-      profileEvent("bootty:dirty-state", {
-        dirtyState,
-        wasmDirtyState,
-        reasons: dirtyReasonKey,
-        dirtyReasonBits,
-        forceAll,
-        viewportY,
-      });
-      this.lastDirtyState = dirtyState;
-      this.lastDirtyReasonKey = dirtyReasonKey;
+    if (hadPendingWrite && dirtyState === DirtyState.NONE) {
+      dirtyState = DirtyState.FULL;
+      dirtyReasons.push("write-fallback");
     }
+    this.lastViewportYForRender = viewportY;
 
     const scrollbackLength = this.wasmTerm.getScrollbackLength();
     const viewportCells = this.composeViewportCells(viewportY, cols, rows, scrollbackLength);
@@ -1371,6 +1368,35 @@ export class Terminal implements ITerminalCore {
           rowFlags[y] |= ROW_DIRTY;
         }
       }
+    }
+
+    if (hadPendingWrite && dirtyState === DirtyState.PARTIAL) {
+      let hasDirtyRows = false;
+      for (let y = 0; y < rows; y++) {
+        if (rowFlags[y] & ROW_DIRTY) {
+          hasDirtyRows = true;
+          break;
+        }
+      }
+      if (!hasDirtyRows) {
+        dirtyState = DirtyState.FULL;
+        dirtyReasons.push("write-fallback");
+        rowFlags.fill(ROW_DIRTY);
+      }
+    }
+
+    const dirtyReasonKey = dirtyReasons.join("|") || "none";
+    if (dirtyState !== this.lastDirtyState || dirtyReasonKey !== this.lastDirtyReasonKey) {
+      profileEvent("bootty:dirty-state", {
+        dirtyState,
+        wasmDirtyState,
+        reasons: dirtyReasonKey,
+        dirtyReasonBits,
+        forceAll,
+        viewportY,
+      });
+      this.lastDirtyState = dirtyState;
+      this.lastDirtyReasonKey = dirtyReasonKey;
     }
 
     const selectionRange = this.selectionManager?.getSelectionCoords() ?? null;
