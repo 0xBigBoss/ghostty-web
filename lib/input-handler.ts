@@ -168,11 +168,14 @@ export class InputHandler {
   private getModeCallback?: (mode: number) => boolean;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
   private keypressListener: ((e: KeyboardEvent) => void) | null = null;
+  private beforeInputListener: ((e: InputEvent) => void) | null = null;
+  private inputListener: ((e: Event) => void) | null = null;
   private pasteListener: ((e: ClipboardEvent) => void) | null = null;
   private compositionStartListener: ((e: CompositionEvent) => void) | null = null;
   private compositionUpdateListener: ((e: CompositionEvent) => void) | null = null;
   private compositionEndListener: ((e: CompositionEvent) => void) | null = null;
   private isComposing = false;
+  private pendingInputFallback = 0;
   private isDisposed = false;
 
   /**
@@ -235,6 +238,14 @@ export class InputHandler {
 
     this.keydownListener = this.handleKeyDown.bind(this);
     this.container.addEventListener("keydown", this.keydownListener);
+
+    this.beforeInputListener = this.handleBeforeInput.bind(this);
+    this.container.addEventListener("beforeinput", this.beforeInputListener);
+
+    this.inputListener = (event: Event) => {
+      this.handleInput(event as InputEvent);
+    };
+    this.container.addEventListener("input", this.inputListener);
 
     this.pasteListener = this.handlePaste.bind(this);
     this.container.addEventListener("paste", this.pasteListener);
@@ -303,7 +314,15 @@ export class InputHandler {
 
     // Ignore keydown events during composition
     // Note: Some browsers send keyCode 229 for all keys during composition
-    if (this.isComposing || event.isComposing || event.keyCode === 229) {
+    const needsInputFallback =
+      event.keyCode === 229 ||
+      event.key === "Process" ||
+      event.key === "Dead" ||
+      event.key === "Unidentified";
+    if (this.isComposing || event.isComposing || needsInputFallback) {
+      if (!this.isComposing && !event.isComposing && needsInputFallback) {
+        this.pendingInputFallback += 1;
+      }
       return;
     }
 
@@ -355,6 +374,7 @@ export class InputHandler {
     // For printable characters without modifiers, send the character directly
     // This handles: a-z, A-Z (with shift), 0-9, punctuation, etc.
     if (this.isPrintableCharacter(event)) {
+      this.pendingInputFallback = 0;
       event.preventDefault();
       this.onDataCallback(event.key);
       return;
@@ -447,6 +467,7 @@ export class InputHandler {
       }
 
       if (simpleOutput !== null) {
+        this.pendingInputFallback = 0;
         event.preventDefault();
         this.onDataCallback(simpleOutput);
         return;
@@ -485,6 +506,7 @@ export class InputHandler {
       const data = decoder.decode(encoded);
 
       // Prevent default browser behavior
+      this.pendingInputFallback = 0;
       event.preventDefault();
       event.stopPropagation();
 
@@ -559,6 +581,7 @@ export class InputHandler {
   private handleCompositionEnd(event: CompositionEvent): void {
     if (this.isDisposed) return;
     this.isComposing = false;
+    this.pendingInputFallback = 0;
 
     const data = event.data;
     if (data && data.length > 0) {
@@ -580,6 +603,46 @@ export class InputHandler {
   }
 
   /**
+   * Handle beforeinput event for input fallback (keyCode 229 cases).
+   */
+  private handleBeforeInput(event: InputEvent): void {
+    if (this.isDisposed || this.pendingInputFallback === 0) return;
+    if (event.isComposing) return;
+    if (event.inputType !== "insertText") return;
+    const data = event.data;
+    if (!data) return;
+    this.pendingInputFallback = Math.max(0, this.pendingInputFallback - 1);
+    event.preventDefault();
+    event.stopPropagation();
+    this.onDataCallback(data);
+  }
+
+  /**
+   * Handle input event fallback (when beforeinput is unavailable).
+   */
+  private handleInput(event: InputEvent): void {
+    if (this.isDisposed || this.pendingInputFallback === 0) return;
+    if (event.isComposing) return;
+    let data = event.data ?? "";
+    if (!data) {
+      const target = event.target;
+      if (
+        typeof HTMLTextAreaElement !== "undefined" &&
+        target instanceof HTMLTextAreaElement &&
+        target.value
+      ) {
+        data = target.value;
+        target.value = "";
+      }
+    }
+    if (!data) return;
+    this.pendingInputFallback = Math.max(0, this.pendingInputFallback - 1);
+    event.preventDefault();
+    event.stopPropagation();
+    this.onDataCallback(data);
+  }
+
+  /**
    * Dispose the InputHandler and remove event listeners
    */
   dispose(): void {
@@ -593,6 +656,16 @@ export class InputHandler {
     if (this.keypressListener) {
       this.container.removeEventListener("keypress", this.keypressListener);
       this.keypressListener = null;
+    }
+
+    if (this.beforeInputListener) {
+      this.container.removeEventListener("beforeinput", this.beforeInputListener);
+      this.beforeInputListener = null;
+    }
+
+    if (this.inputListener) {
+      this.container.removeEventListener("input", this.inputListener);
+      this.inputListener = null;
     }
 
     if (this.pasteListener) {

@@ -419,6 +419,13 @@ export class GhosttyTerminal {
   }
 
   /**
+   * Force the next render_state_update to rebuild all rows.
+   */
+  forceRenderRedraw(): void {
+    this.exports.ghostty_render_state_force_redraw(this.handle);
+  }
+
+  /**
    * Get dirty reason bitmask from the last render state update.
    */
   getDirtyReasons(): number {

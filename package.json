@@ -57,7 +57,7 @@
     "build:wasm-copy": "cp ghostty-vt.wasm dist/",
     "clean": "rm -rf dist",
     "preview": "vite preview",
-    "test": "bun test",
+    "test": "bun test lib",
     "test:playwright": "playwright test -c playwright.config.ts",
     "test:playwright:functional": "playwright test -c playwright.config.ts --project functional",
     "test:playwright:headed": "playwright test -c playwright.config.ts --project headed",

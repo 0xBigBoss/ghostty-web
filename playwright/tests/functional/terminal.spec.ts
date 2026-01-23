@@ -8,6 +8,40 @@ test.describe("BooTTY terminal behavior", () => {
     await openHarness(page);
   });
 
+  test("does not drop typed input (canvas)", async ({ page }) => {
+    await page.evaluate(() => (globalThis as any).__boottyHarness.enableLocalEcho());
+    await page.getByTestId("terminal").click();
+
+    const text = "echo hello world";
+    await page.keyboard.type(text);
+
+    await expect.poll(async () => {
+      return page.evaluate(() => (globalThis as any).__boottyHarness.readViewportLine(0));
+    }).toBe(text);
+  });
+
+  test("does not drop typed input (webgl)", async ({ page }, testInfo) => {
+    const hasWebgl2 = await page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      return Boolean(canvas.getContext("webgl2"));
+    });
+    if (!hasWebgl2) {
+      testInfo.skip("WebGL2 not available in this environment.");
+      return;
+    }
+
+    await openHarness(page, { renderer: "webgl" });
+    await page.evaluate(() => (globalThis as any).__boottyHarness.enableLocalEcho());
+    await page.getByTestId("terminal").click();
+
+    const text = "echo hello world";
+    await page.keyboard.type(text);
+
+    await expect.poll(async () => {
+      return page.evaluate(() => (globalThis as any).__boottyHarness.readViewportLine(0));
+    }).toBe(text);
+  });
+
   test("applies SGR color changes to cells", async ({ page }) => {
     await page.evaluate(async () => {
       const h = (globalThis as any).__boottyHarness;

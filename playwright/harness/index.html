@@ -170,11 +170,25 @@
           }
           const terminal = new Terminal({ ghostty, cols: 80, rows: 24, renderer });
           terminal.open(terminalEl);
+          let echoDisposable = null;
+          function enableLocalEcho() {
+            if (echoDisposable) return;
+            echoDisposable = terminal.onData((data) => terminal.write(data));
+          }
+          function disableLocalEcho() {
+            if (!echoDisposable) return;
+            if (typeof echoDisposable.dispose === "function") {
+              echoDisposable.dispose();
+            }
+            echoDisposable = null;
+          }
 
           globalThis.__boottyHarness = {
             terminal,
             ghostty,
             rendererKind: rendererParam,
+            enableLocalEcho,
+            disableLocalEcho,
             async write(data) {
               terminal.write(data);
               await new Promise((resolve) =>

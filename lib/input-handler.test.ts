@@ -16,6 +16,17 @@ interface MockKeyboardEvent {
   shiftKey: boolean;
   metaKey: boolean;
   repeat: boolean;
+  isComposing?: boolean;
+  keyCode?: number;
+  preventDefault: () => void;
+  stopPropagation: () => void;
+}
+
+interface MockInputEvent {
+  type: string;
+  inputType: string;
+  data: string | null;
+  isComposing: boolean;
   preventDefault: () => void;
   stopPropagation: () => void;
 }
@@ -94,6 +105,22 @@ function createCompositionEvent(
   return {
     type,
     data,
+    preventDefault: mock(() => {}),
+    stopPropagation: mock(() => {}),
+  };
+}
+
+function createInputEvent(
+  inputType: string,
+  data: string | null,
+  isComposing = false,
+  type: "beforeinput" | "input" = "beforeinput",
+): MockInputEvent {
+  return {
+    type,
+    inputType,
+    data,
+    isComposing,
     preventDefault: mock(() => {}),
     stopPropagation: mock(() => {}),
   };
@@ -187,6 +214,8 @@ describe("InputHandler", () => {
       expect(handler.isActive()).toBe(true);
       expect(container._listeners.has("keydown")).toBe(true);
       expect(container._listeners.get("keydown")!.length).toBe(1);
+      expect(container._listeners.has("beforeinput")).toBe(true);
+      expect(container._listeners.has("input")).toBe(true);
     });
 
     test("dispose removes listeners and marks inactive", () => {
@@ -203,6 +232,8 @@ describe("InputHandler", () => {
 
       expect(handler.isActive()).toBe(false);
       expect(container._listeners.get("keydown")!.length).toBe(0);
+      expect(container._listeners.get("beforeinput")!.length).toBe(0);
+      expect(container._listeners.get("input")!.length).toBe(0);
     });
 
     test("dispose is idempotent", () => {
@@ -368,6 +399,44 @@ describe("InputHandler", () => {
       // End composition
       container.dispatchEvent(createCompositionEvent("compositionend", "a"));
       expect(dataReceived).toEqual(["a"]);
+    });
+
+    test("uses beforeinput fallback for keyCode 229 without composition", () => {
+      const handler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {
+          bellCalled = true;
+        },
+      );
+
+      const keyEvent229 = createKeyEvent("KeyE", "e");
+      Object.defineProperty(keyEvent229, "keyCode", { value: 229 });
+      simulateKey(container, keyEvent229);
+
+      container.dispatchEvent(createInputEvent("insertText", "e"));
+
+      expect(dataReceived).toEqual(["e"]);
+    });
+
+    test("uses input fallback when beforeinput is unavailable", () => {
+      const handler = new InputHandler(
+        ghostty,
+        container as any,
+        (data) => dataReceived.push(data),
+        () => {
+          bellCalled = true;
+        },
+      );
+
+      const keyEvent229 = createKeyEvent("KeyE", "Process");
+      Object.defineProperty(keyEvent229, "keyCode", { value: 229 });
+      simulateKey(container, keyEvent229);
+
+      container.dispatchEvent(createInputEvent("insertText", "e", false, "input"));
+
+      expect(dataReceived).toEqual(["e"]);
     });
 
     test("cleans up text nodes in container after composition", () => {

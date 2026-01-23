@@ -16,7 +16,11 @@ describe("Terminal Scrolling", () => {
   beforeEach(async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
-    terminal = await createIsolatedTerminal({ cols: 80, rows: 24 });
+    terminal = await createIsolatedTerminal({
+      cols: 80,
+      rows: 24,
+      smoothScrollDuration: 0,
+    });
     terminal.open(container);
   });
 
@@ -316,7 +320,11 @@ describe("Terminal Scrolling", () => {
     });
 
     test("should handle terminal not yet opened", async () => {
-      const closedTerminal = await createIsolatedTerminal({ cols: 80, rows: 24 });
+      const closedTerminal = await createIsolatedTerminal({
+        cols: 80,
+        rows: 24,
+        smoothScrollDuration: 0,
+      });
 
       // Should not crash when handleWheel is called without wasmTerm
       expect(() => {
@@ -345,7 +353,12 @@ describe("Scrolling Methods", () => {
   beforeEach(async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
-    term = await createIsolatedTerminal({ cols: 80, rows: 24, scrollback: 1000 });
+    term = await createIsolatedTerminal({
+      cols: 80,
+      rows: 24,
+      scrollback: 1000,
+      smoothScrollDuration: 0,
+    });
     term.open(container);
   });
 
@@ -499,7 +512,12 @@ describe("Scroll Events", () => {
   beforeEach(async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
-    term = await createIsolatedTerminal({ cols: 80, rows: 24, scrollback: 1000 });
+    term = await createIsolatedTerminal({
+      cols: 80,
+      rows: 24,
+      scrollback: 1000,
+      smoothScrollDuration: 0,
+    });
     term.open(container);
   });
 
@@ -596,7 +614,12 @@ describe("Custom Wheel Event Handler", () => {
   beforeEach(async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
-    term = await createIsolatedTerminal({ cols: 80, rows: 24, scrollback: 1000 });
+    term = await createIsolatedTerminal({
+      cols: 80,
+      rows: 24,
+      scrollback: 1000,
+      smoothScrollDuration: 0,
+    });
     term.open(container);
   });
 

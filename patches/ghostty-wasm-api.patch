@@ -32,7 +32,7 @@ new file mode 100644
 index 000000000..35abd534f
 --- /dev/null
 +++ b/include/ghostty/vt/terminal.h
-@@ -0,0 +1,416 @@
+@@ -0,0 +1,425 @@
 +/**
 + * @file terminal.h
 + *
@@ -193,6 +193,15 @@ index 000000000..35abd534f
 + * @ingroup terminal
 + */
 +uint32_t ghostty_render_state_update(GhosttyTerminal terminal);
++
++/**
++ * Force the next render_state_update to rebuild all rows.
++ *
++ * @param terminal Terminal handle
++ *
++ * @ingroup terminal
++ */
++void ghostty_render_state_force_redraw(GhosttyTerminal terminal);
 +
 +/**
 + * Get the dirty reason bitmask for the most recent render_state_update.
@@ -490,7 +499,7 @@ diff --git a/src/lib_vt.zig b/src/lib_vt.zig
 index 03a883e20..aae897154 100644
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
-@@ -140,6 +140,42 @@ comptime {
+@@ -140,6 +140,43 @@ comptime {
          @export(&c.sgr_unknown_partial, .{ .name = "ghostty_sgr_unknown_partial" });
          @export(&c.sgr_attribute_tag, .{ .name = "ghostty_sgr_attribute_tag" });
          @export(&c.sgr_attribute_value, .{ .name = "ghostty_sgr_attribute_value" });
@@ -503,6 +512,7 @@ index 03a883e20..aae897154 100644
 +
 +        // RenderState API - high-performance rendering
 +        @export(&c.render_state_update, .{ .name = "ghostty_render_state_update" });
++        @export(&c.render_state_force_redraw, .{ .name = "ghostty_render_state_force_redraw" });
 +        @export(&c.render_state_get_dirty_reasons, .{ .name = "ghostty_render_state_get_dirty_reasons" });
 +        @export(&c.render_state_get_cols, .{ .name = "ghostty_render_state_get_cols" });
 +        @export(&c.render_state_get_rows, .{ .name = "ghostty_render_state_get_rows" });
@@ -561,7 +571,7 @@ index bc92597f5..9de845c5d 100644
  
  // The full C API, unexported.
  pub const osc_new = osc.new;
-@@ -52,6 +53,43 @@ pub const key_encoder_encode = key_encode.encode;
+@@ -52,6 +53,44 @@ pub const key_encoder_encode = key_encode.encode;
  
  pub const paste_is_safe = paste.is_safe;
  
@@ -574,6 +584,7 @@ index bc92597f5..9de845c5d 100644
 +
 +// RenderState API - high-performance rendering
 +pub const render_state_update = terminal.renderStateUpdate;
++pub const render_state_force_redraw = terminal.renderStateForceRedraw;
 +pub const render_state_get_dirty_reasons = terminal.renderStateGetDirtyReasons;
 +pub const render_state_get_cols = terminal.renderStateGetCols;
 +pub const render_state_get_rows = terminal.renderStateGetRows;
@@ -618,7 +629,7 @@ new file mode 100644
 index 000000000..c05bc09cc
 --- /dev/null
 +++ b/src/terminal/c/terminal.zig
-@@ -0,0 +1,587 @@
+@@ -0,0 +1,597 @@
 +const std = @import("std");
 +const Allocator = std.mem.Allocator;
 +const lib_alloc = @import("../../lib/allocator.zig");
@@ -657,6 +668,7 @@ index 000000000..c05bc09cc
 +    stream: ReadonlyStream,
 +    alloc: Allocator,
 +    last_dirty_reasons: u32 = 0,
++    force_redraw: bool = false,
 +};
 +
 +/// C: GhosttyTerminal
@@ -727,6 +739,10 @@ index 000000000..c05bc09cc
 +
 +pub fn renderStateUpdate(handle: TerminalHandle) callconv(.c) u32 {
 +    const wrapper = handle orelse return 0;
++    if (wrapper.force_redraw) {
++        wrapper.force_redraw = false;
++        wrapper.terminal.flags.dirty.clear = true;
++    }
 +    wrapper.last_dirty_reasons = computeDirtyReasons(wrapper);
 +    wrapper.render_state.update(wrapper.alloc, &wrapper.terminal) catch |err| {
 +        log.err("render state update failed: {}", .{err});
@@ -742,6 +758,11 @@ index 000000000..c05bc09cc
 +pub fn renderStateGetDirtyReasons(handle: TerminalHandle) callconv(.c) u32 {
 +    const wrapper = handle orelse return 0;
 +    return wrapper.last_dirty_reasons;
++}
++
++pub fn renderStateForceRedraw(handle: TerminalHandle) callconv(.c) void {
++    const wrapper = handle orelse return;
++    wrapper.force_redraw = true;
 +}
 +
 +pub fn renderStateGetCols(handle: TerminalHandle) callconv(.c) u16 {

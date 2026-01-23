@@ -1375,11 +1375,10 @@ describe("Buffer Access API", () => {
       // Write text longer than terminal width (no newline)
       narrowTerm.write("This is a very long line that will definitely wrap");
 
-      // First line should not be wrapped (start of line)
-      expect(narrowTerm.wasmTerm?.isRowWrapped(0)).toBe(false);
-
-      // Second line should be wrapped (continuation)
+      // Rows that soft-wrap to the next line are marked as wrapped
+      expect(narrowTerm.wasmTerm?.isRowWrapped(0)).toBe(true);
       expect(narrowTerm.wasmTerm?.isRowWrapped(1)).toBe(true);
+      expect(narrowTerm.wasmTerm?.isRowWrapped(2)).toBe(false);
     } finally {
       narrowTerm.dispose();
     }
@@ -1441,6 +1440,7 @@ describe("Terminal Config", () => {
     term.open(container);
 
     try {
+      term.wasmTerm!.update();
       // Get the default colors from render state
       const colors = term.wasmTerm!.getColors();
 
@@ -2378,12 +2378,9 @@ describe("Options Proxy handleOptionChange", () => {
     // Verify option was updated
     expect(term.options.cursorStyle).toBe("underline");
 
-    // Access renderer to verify it was updated
-    // @ts-ignore - accessing private for test
-    const renderer = term.renderer;
-    expect(renderer).toBeDefined();
-    // @ts-ignore - accessing private for test
-    expect(renderer.cursorStyle).toBe("underline");
+    // Verify render input reflects updated cursor style
+    const input = (term as any).buildRenderInput(true, 1);
+    expect(input?.cursorStyle).toBe("underline");
 
     term.dispose();
   });
@@ -2401,18 +2398,14 @@ describe("Options Proxy handleOptionChange", () => {
     term.options.cursorBlink = true;
     expect(term.options.cursorBlink).toBe(true);
 
-    // @ts-ignore - accessing private for test
-    const renderer = term.renderer;
-    // @ts-ignore - accessing private for test
-    expect(renderer.cursorBlink).toBe(true);
-    // @ts-ignore - accessing private for test
-    expect(renderer.cursorBlinkInterval).toBeDefined();
+    (term as any).buildRenderInput(true, 1);
+    expect((term as any).lastCursorBlinkActive).toBe(true);
 
     // Disable cursor blink
     term.options.cursorBlink = false;
     expect(term.options.cursorBlink).toBe(false);
-    // @ts-ignore - accessing private for test
-    expect(renderer.cursorBlink).toBe(false);
+    (term as any).buildRenderInput(true, 1);
+    expect((term as any).lastCursorBlinkActive).toBe(false);
 
     term.dispose();
   });
@@ -2788,6 +2781,7 @@ describe("Grapheme Cluster Support", () => {
     const term = await createIsolatedTerminal();
     term.open(container!);
     term.write("Hello");
+    term.wasmTerm!.update();
 
     // Get the viewport and check the first cell
     const viewport = term.wasmTerm!.getViewport();
@@ -2801,6 +2795,7 @@ describe("Grapheme Cluster Support", () => {
     const term = await createIsolatedTerminal();
     term.open(container!);
     term.write("Test");
+    term.wasmTerm!.update();
 
     // Test basic ASCII
     const grapheme = term.wasmTerm!.getGraphemeString(0, 0);
@@ -2813,6 +2808,7 @@ describe("Grapheme Cluster Support", () => {
     const term = await createIsolatedTerminal();
     term.open(container!);
     term.write("Test");
+    term.wasmTerm!.update();
 
     // Test out of bounds
     const result = term.wasmTerm!.getGrapheme(100, 100);
@@ -2825,6 +2821,7 @@ describe("Grapheme Cluster Support", () => {
     const term = await createIsolatedTerminal();
     term.open(container!);
     term.write("A");
+    term.wasmTerm!.update();
 
     const codepoints = term.wasmTerm!.getGrapheme(0, 0);
     expect(codepoints).not.toBeNull();
@@ -2885,6 +2882,316 @@ describe("Write Behavior", () => {
     expect(line0).toBe("Line1");
     expect(line1).toBe("Line2");
     expect(line2).toBe("Line3");
+
+    term.dispose();
+  });
+
+  test("each character cell has correct codepoint after write", async () => {
+    if (!container) return;
+
+    const term = await createIsolatedTerminal();
+    term.open(container);
+
+    const testString = "echo hello world";
+    term.write(testString);
+
+    // Verify buffer API returns correct content
+    const lineContent = term.buffer.active.getLine(0)?.translateToString().trim();
+    expect(lineContent).toBe(testString);
+
+    // Verify each cell has the correct codepoint
+    const line = term.wasmTerm?.getLine(0);
+    expect(line).not.toBeNull();
+
+    for (let i = 0; i < testString.length; i++) {
+      const expectedCodepoint = testString.charCodeAt(i);
+      const actualCodepoint = line![i].codepoint;
+      expect(actualCodepoint).toBe(expectedCodepoint);
+    }
+
+    // Also verify viewport cells match
+    const viewport = term.wasmTerm?.getViewport();
+    expect(viewport).not.toBeNull();
+
+    for (let i = 0; i < testString.length; i++) {
+      const expectedCodepoint = testString.charCodeAt(i);
+      const viewportCodepoint = viewport![i].codepoint;
+      expect(viewportCodepoint).toBe(expectedCodepoint);
+    }
+
+    term.dispose();
+  });
+
+  test("backspace moves cursor without erasing the previous cell", async () => {
+    if (!container) return;
+    const term = await createIsolatedTerminal();
+    term.open(container);
+    term.write("ab\b");
+    term.wasmTerm?.update();
+    const viewport = term.wasmTerm?.getViewport();
+    expect(viewport).not.toBeNull();
+    expect(viewport![0].codepoint).toBe("a".charCodeAt(0));
+    expect(viewport![1].codepoint).toBe("b".charCodeAt(0));
+    term.dispose();
+  });
+
+  test("each character cell has width=1 for ASCII", async () => {
+    if (!container) return;
+
+    const term = await createIsolatedTerminal();
+    term.open(container);
+
+    const testString = "echo hello world";
+    term.write(testString);
+
+    // IMPORTANT: Call update() to sync render state before getViewport()
+    term.wasmTerm?.update();
+
+    // Verify each cell has width=1
+    const viewport = term.wasmTerm?.getViewport();
+    expect(viewport).not.toBeNull();
+
+    // Debug: print all cells
+    console.log("Cell data for 'echo hello world':");
+    for (let i = 0; i < testString.length; i++) {
+      const cell = viewport![i];
+      console.log(`  [${i}] '${testString[i]}' codepoint=${cell.codepoint} width=${cell.width} grapheme_len=${cell.grapheme_len} flags=${cell.flags}`);
+    }
+
+    for (let i = 0; i < testString.length; i++) {
+      const cell = viewport![i];
+      if (cell.width !== 1) {
+        console.log(`FAIL: cell ${i} ('${testString[i]}') has width=${cell.width}, expected 1`);
+      }
+      expect(cell.width).toBe(1);
+      expect(cell.grapheme_len).toBe(0);
+      expect(cell.flags).toBe(0);
+    }
+
+    term.dispose();
+  });
+
+  test("writing characters one at a time produces correct cells", async () => {
+    if (!container) return;
+
+    const term = await createIsolatedTerminal();
+    term.open(container);
+
+    const testString = "hello";
+
+    // Write one character at a time (simulating PTY echo)
+    for (const char of testString) {
+      term.write(char);
+    }
+
+    // Update render state
+    term.wasmTerm?.update();
+
+    // Check all cells
+    const viewport = term.wasmTerm?.getViewport();
+    expect(viewport).not.toBeNull();
+
+    console.log("After writing 'hello' char by char:");
+    for (let i = 0; i < testString.length; i++) {
+      const cell = viewport![i];
+      const expectedCodepoint = testString.charCodeAt(i);
+      console.log(`  [${i}] expected='${testString[i]}' (${expectedCodepoint}) actual=${cell.codepoint} width=${cell.width}`);
+      expect(cell.codepoint).toBe(expectedCodepoint);
+      expect(cell.width).toBe(1);
+    }
+
+    term.dispose();
+  });
+
+  test("correct row is marked dirty after write", async () => {
+    if (!container) return;
+
+    const term = await createIsolatedTerminal({ cols: 80, rows: 24 });
+    term.open(container);
+
+    // Initial state - clear dirty
+    term.wasmTerm?.update();
+    term.wasmTerm?.clearDirty();
+
+    // Write to row 0
+    term.write("Hello");
+
+    // Check dirty state
+    const dirtyState = term.wasmTerm?.update();
+
+    // Check which rows are dirty
+    const dirtyRows: number[] = [];
+    for (let y = 0; y < 24; y++) {
+      if (term.wasmTerm?.isRowDirty(y)) {
+        dirtyRows.push(y);
+      }
+    }
+
+    // Row 0 should be dirty (or full dirty = 2)
+    // DirtyState: 0=NONE, 1=PARTIAL, 2=FULL
+    const row0IsDirty = dirtyState === 2 || dirtyRows.includes(0);
+    expect(row0IsDirty).toBe(true);
+
+    term.dispose();
+  });
+
+  test("multiple writes between renders produce correct viewport", async () => {
+    if (!container) return;
+
+    const term = await createIsolatedTerminal({ cols: 80, rows: 24 });
+    term.open(container);
+
+    // Simulate rapid typing with multiple characters between renders
+    const testString = "echo hello world";
+
+    // First batch of writes (like initial prompt)
+    term.write("$");
+
+    // Simulate render cycle
+    term.wasmTerm?.update();
+    term.wasmTerm?.clearDirty();
+
+    // Then multiple rapid writes (like user typing)
+    for (const char of testString) {
+      term.write(char);
+    }
+
+    // Final render
+    term.wasmTerm?.update();
+
+    // Check viewport has all characters
+    const viewport = term.wasmTerm?.getViewport();
+    expect(viewport).not.toBeNull();
+
+    // Row 0 should have "$echo hello world"
+    const expectedFull = "$" + testString;
+    console.log("Expected:", expectedFull);
+    console.log("Viewport cells:");
+    for (let i = 0; i < expectedFull.length; i++) {
+      const cell = viewport![i];
+      const expected = expectedFull.charCodeAt(i);
+      console.log(`  [${i}] '${expectedFull[i]}' expected=${expected} actual=${cell.codepoint} width=${cell.width}`);
+      expect(cell.codepoint).toBe(expected);
+    }
+
+    term.dispose();
+  });
+
+  test("cells have visible colors (fg != bg)", async () => {
+    if (!container) return;
+
+    const term = await createIsolatedTerminal({ cols: 80, rows: 24 });
+    term.open(container);
+
+    term.write("Hello");
+    term.wasmTerm?.update();
+
+    const viewport = term.wasmTerm?.getViewport();
+    expect(viewport).not.toBeNull();
+
+    // Check first 5 cells (H-e-l-l-o)
+    for (let i = 0; i < 5; i++) {
+      const cell = viewport![i];
+      const fgHex = `rgb(${cell.fg_r},${cell.fg_g},${cell.fg_b})`;
+      const bgHex = `rgb(${cell.bg_r},${cell.bg_g},${cell.bg_b})`;
+      console.log(
+        `  [${i}] codepoint=${cell.codepoint} fg=${fgHex} bg=${bgHex} flags=${cell.flags}`,
+      );
+
+      // Foreground should not equal background (text should be visible)
+      const fgIsBg =
+        cell.fg_r === cell.bg_r && cell.fg_g === cell.bg_g && cell.fg_b === cell.bg_b;
+      expect(fgIsBg).toBe(false);
+    }
+
+    term.dispose();
+  });
+
+  test("async write and render simulates VSCode timing", async () => {
+    if (!container) return;
+
+    const term = await createIsolatedTerminal({ cols: 80, rows: 24 });
+    term.open(container);
+
+    // Simulate VSCode-like async timing:
+    // 1. Write happens (sets pendingWriteSinceRender)
+    // 2. requestRender schedules rAF
+    // 3. rAF fires, buildRenderInput is called
+    // 4. Render happens
+
+    // Write a character
+    term.write("H");
+
+    // Wait for next microtask (simulating PTY worker response)
+    await new Promise((resolve) => queueMicrotask(resolve));
+
+    // Wait for rAF (simulating render schedule)
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    // Now check the viewport - should have the character
+    term.wasmTerm?.update();
+    const viewport = term.wasmTerm?.getViewport();
+    expect(viewport).not.toBeNull();
+
+    const cell = viewport![0];
+    console.log(`After async write: codepoint=${cell.codepoint} width=${cell.width}`);
+    expect(cell.codepoint).toBe("H".charCodeAt(0));
+    expect(cell.width).toBe(1);
+
+    // Now write more characters with async delays
+    for (const char of "ello") {
+      term.write(char);
+      await new Promise((resolve) => queueMicrotask(resolve));
+    }
+
+    // Wait for final render
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    term.wasmTerm?.update();
+    const finalViewport = term.wasmTerm?.getViewport();
+    const expected = "Hello";
+    console.log("Final viewport after async writes:");
+    for (let i = 0; i < expected.length; i++) {
+      const c = finalViewport![i];
+      console.log(
+        `  [${i}] '${expected[i]}' expected=${expected.charCodeAt(i)} actual=${c.codepoint} width=${c.width}`,
+      );
+      expect(c.codepoint).toBe(expected.charCodeAt(i));
+    }
+
+    term.dispose();
+  });
+
+  test("viewport cells and buffer API return identical data", async () => {
+    if (!container) return;
+
+    const term = await createIsolatedTerminal({ cols: 80, rows: 24 });
+    term.open(container);
+
+    // Write multiple lines
+    term.write("Line one with some text\r\n");
+    term.write("Line two for testing\r\n");
+    term.write("Third line here");
+
+    // Compare buffer API with viewport cells for each row
+    for (let row = 0; row < 3; row++) {
+      const bufferLine = term.wasmTerm?.getLine(row);
+      const viewport = term.wasmTerm?.getViewport();
+      const viewportLine = viewport?.slice(row * 80, (row + 1) * 80);
+
+      expect(bufferLine).not.toBeNull();
+      expect(viewportLine).not.toBeNull();
+
+      // Compare codepoints for first 40 columns
+      for (let col = 0; col < 40; col++) {
+        const bufferCodepoint = bufferLine![col]?.codepoint ?? 0;
+        const viewportCodepoint = viewportLine![col]?.codepoint ?? 0;
+        if (bufferCodepoint !== viewportCodepoint) {
+          console.log(`Mismatch at row=${row} col=${col}: buffer=${bufferCodepoint} viewport=${viewportCodepoint}`);
+        }
+        expect(viewportCodepoint).toBe(bufferCodepoint);
+      }
+    }
 
     term.dispose();
   });
