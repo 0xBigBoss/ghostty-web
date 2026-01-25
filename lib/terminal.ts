@@ -621,9 +621,12 @@ export class Terminal implements ITerminalCore {
 
     // Write directly to WASM terminal (handles VT parsing internally)
     const writeStart = profileStart();
-    const normalized = data;
+    // Check for backspaces BEFORE normalization (they get converted to CSI-D)
+    const hasBS = typeof data === "string" ? data.includes("\b") : data.includes(0x08);
+    const normalized = this.normalizeBackspace(data);
     const analysis = this.analyzeWriteControls(normalized);
-    const needsFullRender = analysis.forceFullReason !== null;
+    // Force full render for backspace sequences (cursor movement may overwrite cells)
+    const needsFullRender = analysis.forceFullReason !== null || hasBS;
     if (needsFullRender) {
       this.forceFullRender = true;
       this.wasmTerm?.forceRenderRedraw();
@@ -633,7 +636,13 @@ export class Terminal implements ITerminalCore {
     if (bytes > 0) {
       this.pendingWriteSinceRender = true;
     }
+    // Debug: log cursor position before and after write if data has backspaces
+    const cursorBefore = hasBS ? this.wasmTerm?.getCursor() : null;
     this.wasmTerm!.write(normalized);
+    if (hasBS && cursorBefore) {
+      const cursorAfter = this.wasmTerm?.getCursor();
+      console.log(`[ghostty-web] writeInternal: cursor before=(${cursorBefore.x},${cursorBefore.y}) after=(${cursorAfter?.x},${cursorAfter?.y})`);
+    }
     profileDuration("bootty:term:write", writeStart, {
       bytes,
       kind: typeof normalized === "string" ? "string" : "bytes",
@@ -690,7 +699,9 @@ export class Terminal implements ITerminalCore {
   ): string | Uint8Array {
     if (typeof data === "string") {
       if (!data.includes("\b")) return data;
-      return data.replace(/\x08/g, Terminal.CSI_LEFT);
+      const result = data.replace(/\x08/g, Terminal.CSI_LEFT);
+      console.log("[ghostty-web] normalizeBackspace: converted", data.length, "bytes with backspaces to", result.length, "bytes");
+      return result;
     }
     if (!data.includes(Terminal.BS_BYTE)) return data;
     let bsCount = 0;
@@ -698,6 +709,11 @@ export class Terminal implements ITerminalCore {
       if (byte === Terminal.BS_BYTE) bsCount += 1;
     }
     if (bsCount === 0) return data;
+    // Log input bytes (first 64 max)
+    const inputPreview = Array.from(data.subarray(0, 64))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join(" ");
+    console.log(`[ghostty-web] normalizeBackspace: input len=${data.byteLength} bsCount=${bsCount} first64=[${inputPreview}]`);
     const expanded = new Uint8Array(data.byteLength + bsCount * 2);
     let offset = 0;
     for (const byte of data) {
@@ -709,6 +725,11 @@ export class Terminal implements ITerminalCore {
         expanded[offset++] = byte;
       }
     }
+    // Log output bytes (first 64 max)
+    const outputPreview = Array.from(expanded.subarray(0, 64))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join(" ");
+    console.log(`[ghostty-web] normalizeBackspace: output len=${expanded.byteLength} first64=[${outputPreview}]`);
     return expanded;
   }
 
