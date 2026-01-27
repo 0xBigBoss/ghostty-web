@@ -137,4 +137,55 @@ test.describe("BooTTY backspace cursor behavior", () => {
     // This is the mathematically correct result for this sequence
     expect(line).toBe("$echoo hello world");
   });
+
+  test("plain text echo renders without BS or CR", async ({ page }) => {
+    // This simulates bash PTY echo: simple character-by-character output
+    // No backspace, no carriage return until newline
+    const readCursor = async () =>
+      page.evaluate(() => (globalThis as any).__boottyHarness.terminal.wasmTerm?.getCursor());
+
+    // Write prompt
+    await writeText(page, "bash$ ");
+    expect((await readCursor()).x).toBe(6);
+
+    // Simulate typing each character (as PTY echo would deliver)
+    await writeText(page, "e");
+    expect((await readCursor()).x).toBe(7);
+    await writeText(page, "c");
+    expect((await readCursor()).x).toBe(8);
+    await writeText(page, "h");
+    expect((await readCursor()).x).toBe(9);
+    await writeText(page, "o");
+    expect((await readCursor()).x).toBe(10);
+    await writeText(page, " ");
+    expect((await readCursor()).x).toBe(11);
+    await writeText(page, "h");
+    expect((await readCursor()).x).toBe(12);
+    await writeText(page, "i");
+    expect((await readCursor()).x).toBe(13);
+
+    // Verify all characters rendered correctly
+    const line = await readViewportLine(page, 0);
+    expect(line).toBe("bash$ echo hi");
+  });
+
+  test("plain text echo via Uint8Array renders correctly", async ({ page }) => {
+    // Same as above but using Uint8Array (the actual PTY data format)
+    const readCursor = async () =>
+      page.evaluate(() => (globalThis as any).__boottyHarness.terminal.wasmTerm?.getCursor());
+
+    // Write prompt as bytes
+    const prompt = Array.from("bash$ ").map(c => c.charCodeAt(0));
+    await writeBytes(page, prompt);
+    expect((await readCursor()).x).toBe(6);
+
+    // Write echo characters as bytes (simulating real PTY output)
+    const echo = Array.from("echo hello world").map(c => c.charCodeAt(0));
+    await writeBytes(page, echo);
+
+    // Verify all characters rendered correctly
+    const line = await readViewportLine(page, 0);
+    expect(line).toBe("bash$ echo hello world");
+    expect((await readCursor()).x).toBe(22);
+  });
 });
