@@ -3215,6 +3215,113 @@ describe("Write Behavior", () => {
 
     term.dispose();
   });
+
+  test("shell-style echo with backspaces and SGR sequences", async () => {
+    if (!container) return;
+
+    const term = await createIsolatedTerminal({ cols: 80, rows: 24 });
+    term.open(container);
+
+    // Simulate what a shell like zsh might send when typing "echo hello"
+    // Some shells echo characters with color codes and cursor movement
+    // Pattern: char, backspace, SGR, char again (for coloring)
+
+    // First, write "echo " normally
+    term.write("echo ");
+
+    // Now simulate a shell that echoes "hello" with potential cursor repositioning
+    // This pattern: write char, maybe backspace, maybe color, write char
+    const shellEcho = "h\x1b[1mello\x1b[0m"; // 'h' then bold 'ello' then reset
+    term.write(shellEcho);
+
+    term.wasmTerm?.update();
+    const viewport = term.wasmTerm?.getViewport();
+    expect(viewport).not.toBeNull();
+
+    const expected = "echo hello";
+    console.log("Shell-style echo test:");
+    console.log("  Expected:", expected);
+    let actual = "";
+    for (let i = 0; i < expected.length; i++) {
+      const cell = viewport![i];
+      const char = cell.codepoint > 0 ? String.fromCodePoint(cell.codepoint) : " ";
+      actual += char;
+      console.log(
+        `  [${i}] expected='${expected[i]}' actual='${char}' (${cell.codepoint}) flags=${cell.flags}`,
+      );
+    }
+    console.log("  Actual:", actual);
+    expect(actual).toBe(expected);
+
+    term.dispose();
+  });
+
+  test("interleaved backspaces simulate line redraw", async () => {
+    if (!container) return;
+
+    const term = await createIsolatedTerminal({ cols: 80, rows: 24 });
+    term.open(container);
+
+    // Simulate a shell that redraws part of the line
+    // Write "hello", then backspace 3 times, then write "LLO" (overwriting)
+    // This simulates partial line redraw for syntax highlighting
+    term.write("hello");
+    term.write("\b\b\bLLO"); // Should result in "heLLO"
+
+    term.wasmTerm?.update();
+    const viewport = term.wasmTerm?.getViewport();
+    expect(viewport).not.toBeNull();
+
+    const expected = "heLLO";
+    console.log("Interleaved backspaces test:");
+    let actual = "";
+    for (let i = 0; i < expected.length; i++) {
+      const cell = viewport![i];
+      const char = cell.codepoint > 0 ? String.fromCodePoint(cell.codepoint) : " ";
+      actual += char;
+      console.log(`  [${i}] expected='${expected[i]}' actual='${char}' (${cell.codepoint})`);
+    }
+    expect(actual).toBe(expected);
+
+    term.dispose();
+  });
+
+  test("rapid writes with renders in between", async () => {
+    if (!container) return;
+
+    const term = await createIsolatedTerminal({ cols: 80, rows: 24 });
+    term.open(container);
+
+    // Simulate rapid typing with render calls after each character
+    // This is closer to what happens with shell echo + animation frames
+    const chars = "hello world";
+
+    for (const char of chars) {
+      term.write(char);
+      // Simulate a render happening between each character
+      term.wasmTerm?.update();
+    }
+
+    term.wasmTerm?.update();
+    const viewport = term.wasmTerm?.getViewport();
+    expect(viewport).not.toBeNull();
+
+    console.log("Rapid writes with renders test:");
+    let actual = "";
+    for (let i = 0; i < chars.length; i++) {
+      const cell = viewport![i];
+      const char = cell.codepoint > 0 ? String.fromCodePoint(cell.codepoint) : " ";
+      actual += char;
+      if (char !== chars[i]) {
+        console.log(`  MISMATCH [${i}] expected='${chars[i]}' actual='${char}'`);
+      }
+    }
+    console.log("  Expected:", chars);
+    console.log("  Actual:", actual);
+    expect(actual).toBe(chars);
+
+    term.dispose();
+  });
 });
 
 // ==========================================================================

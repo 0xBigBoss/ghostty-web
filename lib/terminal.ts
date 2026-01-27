@@ -614,6 +614,17 @@ export class Terminal implements ITerminalCore {
   /**
    * Internal write implementation (extracted from write())
    */
+  // Debug: enable verbose write logging via GHOSTTY_DEBUG_WRITES env or window flag
+  private static debugWritesEnabled: boolean | null = null;
+  private static shouldDebugWrites(): boolean {
+    if (Terminal.debugWritesEnabled === null) {
+      Terminal.debugWritesEnabled =
+        typeof window !== "undefined" && (window as any).GHOSTTY_DEBUG_WRITES === true;
+    }
+    return Terminal.debugWritesEnabled;
+  }
+  private static writeCounter = 0;
+
   private writeInternal(data: string | Uint8Array, callback?: () => void): void {
     // Note: We intentionally do NOT clear selection on write - most modern terminals
     // preserve selection when new data arrives. Selection is cleared by user actions
@@ -626,7 +637,7 @@ export class Terminal implements ITerminalCore {
     const normalized = this.normalizeBackspace(data);
     const analysis = this.analyzeWriteControls(normalized);
     // Force full render for backspace sequences (cursor movement may overwrite cells)
-    const needsFullRender = analysis.forceFullReason !== null || hasBS;
+    const needsFullRender = analysis.forceFullReason !== null || analysis.hasBackspace || analysis.hasCarriageReturn;
     if (needsFullRender) {
       this.forceFullRender = true;
       this.wasmTerm?.forceRenderRedraw();
@@ -636,12 +647,43 @@ export class Terminal implements ITerminalCore {
     if (bytes > 0) {
       this.pendingWriteSinceRender = true;
     }
-    // Debug: log cursor position before and after write if data has backspaces
-    const cursorBefore = hasBS ? this.wasmTerm?.getCursor() : null;
+
+    // Verbose debug logging for ALL writes (enable with window.GHOSTTY_DEBUG_WRITES = true)
+    const debugWrites = Terminal.shouldDebugWrites();
+    const writeId = ++Terminal.writeCounter;
+    const cursorBefore = (hasBS || debugWrites) ? this.wasmTerm?.getCursor() : null;
+
+    if (debugWrites && cursorBefore) {
+      const rawBytes = typeof data === "string"
+        ? Array.from(data).map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).slice(0, 32)
+        : Array.from(data.subarray(0, 32)).map(b => b.toString(16).padStart(2, "0"));
+      console.log(`[write#${writeId}] INPUT len=${bytes} hasBS=${hasBS} cursor=(${cursorBefore.x},${cursorBefore.y}) bytes=[${rawBytes.join(" ")}]${bytes > 32 ? "..." : ""}`);
+    }
+
     this.wasmTerm!.write(normalized);
-    if (hasBS && cursorBefore) {
+
+    if ((hasBS || debugWrites) && cursorBefore) {
       const cursorAfter = this.wasmTerm?.getCursor();
-      console.log(`[ghostty-web] writeInternal: cursor before=(${cursorBefore.x},${cursorBefore.y}) after=(${cursorAfter?.x},${cursorAfter?.y})`);
+      console.log(`[write#${writeId}] cursor before=(${cursorBefore.x},${cursorBefore.y}) after=(${cursorAfter?.x},${cursorAfter?.y})`);
+
+      // Diagnostic: dump first 3 lines of viewport cells after write
+      this.wasmTerm?.update();
+      const viewport = this.wasmTerm?.getViewport();
+      if (viewport) {
+        const cols = this.cols;
+        for (let row = 0; row < Math.min(3, this.rows); row++) {
+          let text = "";
+          for (let col = 0; col < cols; col++) {
+            const cell = viewport[row * cols + col];
+            if (cell && cell.codepoint > 0) {
+              text += String.fromCodePoint(cell.codepoint);
+            } else {
+              text += " ";
+            }
+          }
+          console.log(`[write#${writeId}] viewport row ${row}: "${text.trimEnd()}"`);
+        }
+      }
     }
     profileDuration("bootty:term:write", writeStart, {
       bytes,

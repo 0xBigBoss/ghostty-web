@@ -234,6 +234,23 @@ export class CanvasRenderer implements Renderer {
       dirtyState: input.dirtyState,
     });
 
+    // Diagnostic: dump first 3 lines of viewport cells received by renderer
+    // This is enabled when dirtyState is FULL (which happens on backspace writes)
+    if (forceAll && input.viewportCells.length > 0) {
+      for (let row = 0; row < Math.min(3, rows); row++) {
+        let text = "";
+        for (let col = 0; col < cols; col++) {
+          const cell = input.viewportCells[row * cols + col];
+          if (cell && cell.codepoint > 0) {
+            text += String.fromCodePoint(cell.codepoint);
+          } else {
+            text += " ";
+          }
+        }
+        console.log(`[renderer] viewport row ${row}: "${text.trimEnd()}"`);
+      }
+    }
+
     const rowsStart = profileStart();
     for (let y = 0; y < rows; y++) {
       if (!rowsToRender.has(y)) continue;
