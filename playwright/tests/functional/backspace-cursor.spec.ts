@@ -80,4 +80,61 @@ test.describe("BooTTY backspace cursor behavior", () => {
     const line = await readViewportLine(page, 0);
     expect(line).toBe("Xbcdefgh");
   });
+
+  test("CSI D with count should move cursor correctly", async ({ page }) => {
+    // Test that CSI nD (cursor back with count) works correctly
+    const readCursor = async () =>
+      page.evaluate(() => (globalThis as any).__boottyHarness.terminal.wasmTerm?.getCursor());
+
+    // Write 20 characters to get cursor at x=20
+    await writeText(page, "01234567890123456789");
+    const before = await readCursor();
+    expect(before).toMatchObject({ x: 20, y: 0 });
+
+    // CSI 14D should move cursor from x=20 to x=6
+    await writeBytes(page, [0x1b, 0x5b, 0x31, 0x34, 0x44]); // ESC[14D
+    const after = await readCursor();
+    expect(after).toMatchObject({ x: 6, y: 0 });
+
+    // Write X to verify position
+    await writeText(page, "X");
+    const line = await readViewportLine(page, 0);
+    expect(line).toBe("012345X7890123456789");
+  });
+
+  test("zsh autosuggest sequence cursor position tracking", async ({ page }) => {
+    // Simplified test focusing on cursor position tracking
+    const readCursor = async () =>
+      page.evaluate(() => (globalThis as any).__boottyHarness.terminal.wasmTerm?.getCursor());
+
+    // Setup: "$ echo hello world" with cursor at position 4 (after "$ ec")
+    await writeText(page, "$ echo hello world");
+    // Use CSI 14D to position cursor (18 - 14 = 4)
+    await writeBytes(page, [0x1b, 0x5b, 0x31, 0x34, 0x44]);
+
+    const cursor = await readCursor();
+    expect(cursor).toMatchObject({ x: 4, y: 0 });
+
+    // Now do the write#10 sequence:
+    // BS→3, write "ho"→5, 4xBS→1, write "echo"→5
+    await writeBytes(page, [
+      0x08,  // BS: x=4→3
+    ]);
+    expect((await readCursor()).x).toBe(3);
+
+    await writeText(page, "ho");  // x=3→5
+    expect((await readCursor()).x).toBe(5);
+
+    await writeBytes(page, [0x08, 0x08, 0x08, 0x08]);  // 4xBS: x=5→1
+    expect((await readCursor()).x).toBe(1);
+
+    await writeText(page, "echo");  // x=1→5
+    expect((await readCursor()).x).toBe(5);
+
+    // The result: "echo" was written at positions 1-4, overwriting the space
+    const line = await readViewportLine(page, 0);
+    // Position 0: $, Position 1: e (was space), Position 2: c, Position 3: h, Position 4: o
+    // This is the mathematically correct result for this sequence
+    expect(line).toBe("$echoo hello world");
+  });
 });

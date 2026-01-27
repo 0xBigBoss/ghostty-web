@@ -637,7 +637,8 @@ export class Terminal implements ITerminalCore {
     const normalized = this.normalizeBackspace(data);
     const analysis = this.analyzeWriteControls(normalized);
     // Force full render for backspace sequences (cursor movement may overwrite cells)
-    const needsFullRender = analysis.forceFullReason !== null || analysis.hasBackspace || analysis.hasCarriageReturn;
+    // Use hasBS from original data since string normalization converts BS to CSI-D
+    const needsFullRender = analysis.forceFullReason !== null || hasBS || analysis.hasCarriageReturn;
     if (needsFullRender) {
       this.forceFullRender = true;
       this.wasmTerm?.forceRenderRedraw();
@@ -739,40 +740,15 @@ export class Terminal implements ITerminalCore {
   private normalizeBackspace(
     data: string | Uint8Array,
   ): string | Uint8Array {
-    if (typeof data === "string") {
-      if (!data.includes("\b")) return data;
-      const result = data.replace(/\x08/g, Terminal.CSI_LEFT);
-      console.log("[ghostty-web] normalizeBackspace: converted", data.length, "bytes with backspaces to", result.length, "bytes");
-      return result;
+    // For Uint8Array (PTY output), pass through unchanged.
+    // ghostty-vt handles BS (0x08) correctly; converting to CSI-D causes cursor drift
+    // with shells like zsh that rely on precise BS semantics.
+    if (typeof data !== "string") {
+      return data;
     }
-    if (!data.includes(Terminal.BS_BYTE)) return data;
-    let bsCount = 0;
-    for (const byte of data) {
-      if (byte === Terminal.BS_BYTE) bsCount += 1;
-    }
-    if (bsCount === 0) return data;
-    // Log input bytes (first 64 max)
-    const inputPreview = Array.from(data.subarray(0, 64))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join(" ");
-    console.log(`[ghostty-web] normalizeBackspace: input len=${data.byteLength} bsCount=${bsCount} first64=[${inputPreview}]`);
-    const expanded = new Uint8Array(data.byteLength + bsCount * 2);
-    let offset = 0;
-    for (const byte of data) {
-      if (byte === Terminal.BS_BYTE) {
-        expanded[offset++] = 0x1b;
-        expanded[offset++] = 0x5b;
-        expanded[offset++] = 0x44;
-      } else {
-        expanded[offset++] = byte;
-      }
-    }
-    // Log output bytes (first 64 max)
-    const outputPreview = Array.from(expanded.subarray(0, 64))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join(" ");
-    console.log(`[ghostty-web] normalizeBackspace: output len=${expanded.byteLength} first64=[${outputPreview}]`);
-    return expanded;
+    // For string input (user-typed data), convert BS to CSI-D for consistency
+    if (!data.includes("\b")) return data;
+    return data.replace(/\x08/g, Terminal.CSI_LEFT);
   }
 
   private analyzeWriteControls(data: string | Uint8Array): {
