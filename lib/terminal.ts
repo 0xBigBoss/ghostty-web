@@ -37,8 +37,12 @@ import { UrlRegexProvider } from "./providers/url-regex-provider";
 import { profileDuration, profileEvent, profileStart } from "./profile";
 import { renderScheduler } from "./render-scheduler";
 import { CanvasRenderer } from "./renderer";
+import {
+  buildFrameModel,
+  createFrameModelBuilderCache,
+  type FrameModelBuilderState,
+} from "./frame-model-builder";
 import type { HyperlinkRange, LinkRange, RenderInput, Renderer } from "./renderer-types";
-import { ROW_DIRTY, ROW_HAS_HYPERLINK, ROW_HAS_SELECTION } from "./renderer-types";
 import { SelectionManager } from "./selection-manager";
 import { resolveTheme } from "./theme";
 import type { ILink, ILinkProvider } from "./types";
@@ -61,10 +65,13 @@ type RenderRequestReason =
   | "hover:hyperlink"
   | "hover:link-range"
   | "hover:leave"
+  | "renderer:swap"
   | "animation"
   | "cursor:blink"
   | "resume"
   | "unknown";
+
+const EMPTY_DIRTY_ROWS: ReadonlySet<number> = new Set<number>();
 
 // ============================================================================
 // Terminal Class
@@ -183,13 +190,7 @@ export class Terminal implements ITerminalCore {
   private readonly SCROLLBAR_FADE_DURATION_MS = 200; // 200ms fade animation
   private readonly CURSOR_BLINK_INTERVAL_MS = 530;
   private resolvedTheme = resolveTheme();
-  private rowFlags = new Uint8Array(0);
-  private composedViewportCells: GhosttyCell[] = [];
-  private renderInput?: RenderInput;
-  private renderInputViewportY = 0;
-  private renderInputScrollbackLength = 0;
-  private renderInputCols = 0;
-  private renderInputRows = 0;
+  private frameModelCache = createFrameModelBuilderCache();
   private lastViewportYForRender: number = 0;
   private lastCursorPosition: { x: number; y: number } = { x: 0, y: 0 };
   private lastCursorVisible: boolean = true;
@@ -326,6 +327,42 @@ export class Terminal implements ITerminalCore {
     this.renderer.resize(this.cols, this.rows);
     this.forceFullRender = true;
     this.requestRender(true, "option:font");
+  }
+
+  /**
+   * Swap renderer backend at runtime while keeping terminal state.
+   * Primarily used for runtime fallback (WebGL -> Canvas).
+   */
+  public setRenderer(renderer?: Renderer): void {
+    this.assertOpen();
+    if (!this.canvas) {
+      throw new Error("Terminal canvas is not initialized");
+    }
+
+    const nextRenderer =
+      renderer ??
+      new CanvasRenderer({
+        fontSize: this.options.fontSize,
+        fontFamily: this.options.fontFamily,
+        theme: this.options.theme,
+      });
+    const previousRenderer = this.renderer;
+    if (previousRenderer === nextRenderer) {
+      return;
+    }
+
+    previousRenderer?.dispose();
+
+    this.renderer = nextRenderer;
+    this.renderer.attach(this.canvas);
+    this.renderer.setFontSize(this.options.fontSize);
+    this.renderer.setFontFamily(this.options.fontFamily);
+    this.renderer.updateTheme(this.resolvedTheme);
+    this.renderer.resize(this.cols, this.rows);
+
+    this.selectionManager?.setRenderer(this.renderer);
+    this.forceFullRender = true;
+    this.requestRender(true, "renderer:swap");
   }
 
   /**
@@ -615,13 +652,9 @@ export class Terminal implements ITerminalCore {
    * Internal write implementation (extracted from write())
    */
   // Debug: enable verbose write logging via GHOSTTY_DEBUG_WRITES env or window flag
-  private static debugWritesEnabled: boolean | null = null;
   private static shouldDebugWrites(): boolean {
-    if (Terminal.debugWritesEnabled === null) {
-      Terminal.debugWritesEnabled =
-        typeof window !== "undefined" && (window as any).GHOSTTY_DEBUG_WRITES === true;
-    }
-    return Terminal.debugWritesEnabled;
+    if (typeof window === "undefined") return false;
+    return (window as Window & { GHOSTTY_DEBUG_WRITES?: boolean }).GHOSTTY_DEBUG_WRITES === true;
   }
   private static writeCounter = 0;
 
@@ -651,8 +684,8 @@ export class Terminal implements ITerminalCore {
 
     // Verbose debug logging for ALL writes (enable with window.GHOSTTY_DEBUG_WRITES = true)
     const debugWrites = Terminal.shouldDebugWrites();
-    const writeId = ++Terminal.writeCounter;
-    const cursorBefore = (hasBS || debugWrites) ? this.wasmTerm?.getCursor() : null;
+    const writeId = debugWrites ? ++Terminal.writeCounter : 0;
+    const cursorBefore = debugWrites ? this.wasmTerm?.getCursor() : null;
 
     if (debugWrites && cursorBefore) {
       const rawBytes = typeof data === "string"
@@ -663,7 +696,7 @@ export class Terminal implements ITerminalCore {
 
     this.wasmTerm!.write(normalized);
 
-    if ((hasBS || debugWrites) && cursorBefore) {
+    if (debugWrites && cursorBefore) {
       const cursorAfter = this.wasmTerm?.getCursor();
       console.log(`[write#${writeId}] cursor before=(${cursorBefore.x},${cursorBefore.y}) after=(${cursorAfter?.x},${cursorAfter?.y})`);
 
@@ -1377,85 +1410,10 @@ export class Terminal implements ITerminalCore {
   // Private Methods
   // ==========================================================================
 
-  private ensureRowFlags(rows: number): Uint8Array {
-    if (this.rowFlags.length !== rows) {
-      this.rowFlags = new Uint8Array(rows);
-    }
-    return this.rowFlags;
-  }
-
   private rangesEqual(a: LinkRange | null, b: LinkRange | null): boolean {
     if (!a && !b) return true;
     if (!a || !b) return false;
     return a.startX === b.startX && a.startY === b.startY && a.endX === b.endX && a.endY === b.endY;
-  }
-
-  private getGraphemeString = (viewportRow: number, col: number): string => {
-    if (!this.wasmTerm) return "";
-    const cols = this.renderInputCols;
-    const rows = this.renderInputRows;
-    const viewportY = this.renderInputViewportY;
-    const scrollbackLength = this.renderInputScrollbackLength;
-    if (viewportRow < 0 || viewportRow >= rows || col < 0 || col >= cols) return "";
-    if (viewportY > 0) {
-      if (viewportRow < viewportY) {
-        const scrollbackOffset = scrollbackLength - viewportY + viewportRow;
-        if (scrollbackOffset < 0 || scrollbackOffset >= scrollbackLength) return "";
-        return this.wasmTerm.getScrollbackGraphemeString(scrollbackOffset, col);
-      }
-      const screenRow = viewportRow - viewportY;
-      if (screenRow < 0 || screenRow >= rows) return "";
-      return this.wasmTerm.getGraphemeString(screenRow, col);
-    }
-    return this.wasmTerm.getGraphemeString(viewportRow, col);
-  };
-
-  private composeViewportCells(
-    viewportY: number,
-    cols: number,
-    rows: number,
-    scrollbackLength: number,
-  ): GhosttyCell[] {
-    if (!this.wasmTerm) return [];
-    if (viewportY <= 0) {
-      return this.wasmTerm.getViewport();
-    }
-
-    const screenCells = this.wasmTerm.getViewport();
-    const total = cols * rows;
-    if (this.composedViewportCells.length !== total) {
-      this.composedViewportCells = new Array(total);
-    }
-    const out = this.composedViewportCells;
-    const emptyCell = Terminal.EMPTY_CELL;
-
-    for (let row = 0; row < rows; row++) {
-      const outOffset = row * cols;
-      if (row < viewportY) {
-        const scrollbackOffset = scrollbackLength - viewportY + row;
-        const line =
-          scrollbackOffset >= 0 && scrollbackOffset < scrollbackLength
-            ? this.wasmTerm.getScrollbackLine(scrollbackOffset)
-            : null;
-        for (let col = 0; col < cols; col++) {
-          out[outOffset + col] = line?.[col] ?? emptyCell;
-        }
-      } else {
-        const screenRow = row - viewportY;
-        if (screenRow < 0 || screenRow >= rows) {
-          for (let col = 0; col < cols; col++) {
-            out[outOffset + col] = emptyCell;
-          }
-          continue;
-        }
-        const screenOffset = screenRow * cols;
-        for (let col = 0; col < cols; col++) {
-          out[outOffset + col] = screenCells[screenOffset + col] ?? emptyCell;
-        }
-      }
-    }
-
-    return out;
   }
 
   private buildRenderInput(forceAll: boolean, scrollbarOpacity: number): RenderInput | null {
@@ -1465,250 +1423,88 @@ export class Terminal implements ITerminalCore {
     const cols = this.cols;
     const rows = this.rows;
     const rawViewportY = this.getViewportY();
-    const viewportY = Math.max(0, Math.floor(rawViewportY));
     const hadPendingWrite = this.pendingWriteSinceRender;
     this.pendingWriteSinceRender = false;
-
-    const wasmDirtyState = this.wasmTerm.update();
-    const dirtyReasonBits = this.wasmTerm.getDirtyReasons();
-    const dirtyReasons: string[] = [];
-    if (wasmDirtyState === DirtyState.FULL) {
-      dirtyReasons.push("wasm");
-    } else if (wasmDirtyState === DirtyState.PARTIAL) {
-      dirtyReasons.push("wasm-partial");
-    }
-    const viewportChanged = viewportY > 0 || viewportY !== this.lastViewportYForRender;
-    if (forceAll) {
-      dirtyReasons.push("forceAll");
-    }
-    if (viewportChanged) {
-      dirtyReasons.push("viewport");
-    }
-
-    let dirtyState = wasmDirtyState;
-    if (forceAll || viewportChanged) {
-      dirtyState = DirtyState.FULL;
-    }
-    if (hadPendingWrite && dirtyState === DirtyState.NONE) {
-      dirtyState = DirtyState.FULL;
-      dirtyReasons.push("write-fallback");
-    }
-    this.lastViewportYForRender = viewportY;
-
-    const scrollbackLength = this.wasmTerm.getScrollbackLength();
-    const viewportCells = this.composeViewportCells(viewportY, cols, rows, scrollbackLength);
-    const rowFlags = this.ensureRowFlags(rows);
-    rowFlags.fill(0);
-
-    if (dirtyState === DirtyState.FULL) {
-      rowFlags.fill(ROW_DIRTY);
-    } else if (dirtyState === DirtyState.PARTIAL) {
-      for (let y = 0; y < rows; y++) {
-        if (this.wasmTerm.isRowDirty(y)) {
-          rowFlags[y] |= ROW_DIRTY;
-        }
-      }
-    }
-
-    if (hadPendingWrite && dirtyState === DirtyState.PARTIAL) {
-      let hasDirtyRows = false;
-      for (let y = 0; y < rows; y++) {
-        if (rowFlags[y] & ROW_DIRTY) {
-          hasDirtyRows = true;
-          break;
-        }
-      }
-      if (!hasDirtyRows) {
-        dirtyState = DirtyState.FULL;
-        dirtyReasons.push("write-fallback");
-        rowFlags.fill(ROW_DIRTY);
-      }
-    }
-
-    const cursor = this.wasmTerm.getCursorFromState();
-
-    if (hadPendingWrite && dirtyState === DirtyState.PARTIAL) {
-      const cursorRow = cursor.y;
-      if (cursorRow >= 0 && cursorRow < rows && (rowFlags[cursorRow] & ROW_DIRTY) === 0) {
-        rowFlags[cursorRow] |= ROW_DIRTY;
-        dirtyReasons.push("cursor-row-fallback");
-      }
-    }
-
-    const dirtyReasonKey = dirtyReasons.join("|") || "none";
-    if (dirtyState !== this.lastDirtyState || dirtyReasonKey !== this.lastDirtyReasonKey) {
-      profileEvent("bootty:dirty-state", {
-        dirtyState,
-        wasmDirtyState,
-        reasons: dirtyReasonKey,
-        dirtyReasonBits,
-        forceAll,
-        viewportY,
-      });
-      this.lastDirtyState = dirtyState;
-      this.lastDirtyReasonKey = dirtyReasonKey;
-    }
-
     const selectionRange = this.selectionManager?.getSelectionCoords() ?? null;
-    if (selectionRange) {
-      for (let y = selectionRange.startRow; y <= selectionRange.endRow; y++) {
-        if (y >= 0 && y < rows) {
-          rowFlags[y] |= ROW_HAS_SELECTION;
-        }
-      }
-    }
-
-    if (this.selectionManager) {
-      const dirtyRows = this.selectionManager.getDirtySelectionRows();
-      if (dirtyRows.size > 0) {
-        for (const row of dirtyRows) {
-          if (row >= 0 && row < rows) {
-            rowFlags[row] |= ROW_DIRTY | ROW_HAS_SELECTION;
-          }
-        }
-        this.selectionManager.clearDirtySelectionRows();
-      }
-    }
-
+    const dirtySelectionRows = this.selectionManager?.getDirtySelectionRows() ?? EMPTY_DIRTY_ROWS;
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-    const blinkVisible =
-      !this.options.cursorBlink || Math.floor(now / this.CURSOR_BLINK_INTERVAL_MS) % 2 === 0;
-    const cursorBlinkActive = this.options.cursorBlink && cursor.visible && viewportY === 0;
-    const cursorVisible = cursor.visible && viewportY === 0 && blinkVisible;
-    const cursorMoved =
-      cursor.x !== this.lastCursorPosition.x || cursor.y !== this.lastCursorPosition.y;
-    const cursorVisibilityChanged = cursorVisible !== this.lastCursorVisible;
-    const blinkChanged = blinkVisible !== this.lastBlinkVisible;
+    const builderState: FrameModelBuilderState = {
+      lastViewportYForRender: this.lastViewportYForRender,
+      lastCursorPosition: this.lastCursorPosition,
+      lastCursorVisible: this.lastCursorVisible,
+      lastCursorBlinkActive: this.lastCursorBlinkActive,
+      lastBlinkVisible: this.lastBlinkVisible,
+      previousHoveredHyperlinkId: this.previousHoveredHyperlinkId,
+      previousHoveredLinkRange: this.previousHoveredLinkRange,
+      hoveredLinkState: this.hoveredLinkState,
+    };
 
-    if (cursorMoved || cursorVisibilityChanged || blinkChanged) {
-      const markRow = (row: number) => {
-        if (row >= 0 && row < rows) {
-          rowFlags[row] |= ROW_DIRTY;
-        }
-      };
-      markRow(this.lastCursorPosition.y);
-      markRow(cursor.y);
-    }
-    this.lastCursorPosition = { x: cursor.x, y: cursor.y };
-    this.lastCursorVisible = cursorVisible;
-    this.lastCursorBlinkActive = cursorBlinkActive;
-    this.lastBlinkVisible = blinkVisible;
+    const result = buildFrameModel({
+      wasm: this.wasmTerm,
+      cols,
+      rows,
+      rawViewportY,
+      forceAll,
+      pendingWriteSinceRender: hadPendingWrite,
+      cursorBlinkEnabled: this.options.cursorBlink,
+      cursorStyle: this.options.cursorStyle,
+      selectionRange,
+      dirtySelectionRows,
+      hoveredHyperlinkId: this.hoveredHyperlinkId,
+      hoveredLinkRange: this.hoveredLinkRange,
+      theme: this.resolvedTheme,
+      scrollbarOpacity,
+      now,
+      emptyCell: Terminal.EMPTY_CELL,
+      cache: this.frameModelCache,
+      state: builderState,
+    });
 
-    const hyperlinkChanged = this.hoveredHyperlinkId !== this.previousHoveredHyperlinkId;
-    if (hyperlinkChanged) {
-      for (let y = 0; y < rows; y++) {
-        const rowOffset = y * cols;
-        for (let x = 0; x < cols; x++) {
-          const cell = viewportCells[rowOffset + x];
-          if (
-            cell &&
-            (cell.hyperlink_id === this.hoveredHyperlinkId ||
-              cell.hyperlink_id === this.previousHoveredHyperlinkId)
-          ) {
-            rowFlags[y] |= ROW_DIRTY | ROW_HAS_HYPERLINK;
-            break;
-          }
-        }
-      }
-      this.previousHoveredHyperlinkId = this.hoveredHyperlinkId;
+    if (dirtySelectionRows.size > 0) {
+      this.selectionManager?.clearDirtySelectionRows();
     }
 
-    const rangeChanged = !this.rangesEqual(this.hoveredLinkRange, this.previousHoveredLinkRange);
-    if (rangeChanged) {
-      const markRangeRows = (range: LinkRange | null) => {
-        if (!range) return;
-        for (let y = range.startY; y <= range.endY; y++) {
-          if (y >= 0 && y < rows) {
-            rowFlags[y] |= ROW_DIRTY | ROW_HAS_HYPERLINK;
-          }
-        }
-      };
-      markRangeRows(this.previousHoveredLinkRange);
-      markRangeRows(this.hoveredLinkRange);
-      this.previousHoveredLinkRange = this.hoveredLinkRange;
-    }
+    this.lastViewportYForRender = result.state.lastViewportYForRender;
+    this.lastCursorPosition = result.state.lastCursorPosition;
+    this.lastCursorVisible = result.state.lastCursorVisible;
+    this.lastCursorBlinkActive = result.state.lastCursorBlinkActive;
+    this.lastBlinkVisible = result.state.lastBlinkVisible;
+    this.previousHoveredHyperlinkId = result.state.previousHoveredHyperlinkId;
+    this.previousHoveredLinkRange = result.state.previousHoveredLinkRange;
+    this.hoveredLinkState = result.state.hoveredLinkState;
 
-    let hoveredLink: HyperlinkRange | null = null;
-    if (this.hoveredHyperlinkId > 0 || this.hoveredLinkRange) {
-      if (!this.hoveredLinkState) {
-        this.hoveredLinkState = { hyperlinkId: 0, range: null };
-      }
-      this.hoveredLinkState.hyperlinkId = this.hoveredHyperlinkId;
-      this.hoveredLinkState.range = this.hoveredLinkRange;
-      hoveredLink = this.hoveredLinkState;
-    } else if (this.hoveredLinkState) {
-      this.hoveredLinkState.hyperlinkId = 0;
-      this.hoveredLinkState.range = null;
-    }
-
-    this.renderInputViewportY = viewportY;
-    this.renderInputScrollbackLength = scrollbackLength;
-    this.renderInputCols = cols;
-    this.renderInputRows = rows;
-
-    const input: RenderInput =
-      this.renderInput ??
-      (this.renderInput = {
-        cols,
-        rows,
-        viewportCells,
-        rowFlags,
-        dirtyState,
-        selectionRange,
-        hoveredLink,
-        cursorX: cursor.x,
-        cursorY: cursor.y,
-        cursorVisible,
-        cursorStyle: this.options.cursorStyle,
-        getGraphemeString: this.getGraphemeString,
-        theme: this.resolvedTheme,
-        viewportY: rawViewportY,
-        scrollbackLength,
-        scrollbarOpacity,
+    if (
+      result.debug.dirtyState !== this.lastDirtyState ||
+      result.debug.dirtyReasonKey !== this.lastDirtyReasonKey
+    ) {
+      profileEvent("bootty:dirty-state", {
+        dirtyState: result.debug.dirtyState,
+        wasmDirtyState: result.debug.wasmDirtyState,
+        reasons: result.debug.dirtyReasonKey,
+        dirtyReasonBits: result.debug.dirtyReasonBits,
+        forceAll,
+        viewportY: result.debug.viewportY,
       });
-
-    input.cols = cols;
-    input.rows = rows;
-    input.viewportCells = viewportCells;
-    input.rowFlags = rowFlags;
-    input.dirtyState = dirtyState;
-    input.selectionRange = selectionRange;
-    input.hoveredLink = hoveredLink;
-    input.cursorX = cursor.x;
-    input.cursorY = cursor.y;
-    input.cursorVisible = cursorVisible;
-    input.cursorStyle = this.options.cursorStyle;
-    input.theme = this.resolvedTheme;
-    input.viewportY = rawViewportY;
-    input.scrollbackLength = scrollbackLength;
-    input.scrollbarOpacity = scrollbarOpacity;
-
-    let dirtyRows = 0;
-    let selectionRows = 0;
-    let hyperlinkRows = 0;
-    for (let y = 0; y < rows; y++) {
-      const flags = rowFlags[y];
-      if (flags & ROW_DIRTY) dirtyRows++;
-      if (flags & ROW_HAS_SELECTION) selectionRows++;
-      if (flags & ROW_HAS_HYPERLINK) hyperlinkRows++;
+      this.lastDirtyState = result.debug.dirtyState;
+      this.lastDirtyReasonKey = result.debug.dirtyReasonKey;
     }
 
     profileDuration("bootty:render:build-input", buildStart, {
       cols,
       rows,
-      dirtyState,
-      wasmDirtyState,
-      dirtyReasons: dirtyReasonKey,
-      dirtyReasonBits,
-      dirtyRows,
-      selectionRows,
-      hyperlinkRows,
-      viewportY,
-      scrollbackLength,
+      dirtyState: result.debug.dirtyState,
+      wasmDirtyState: result.debug.wasmDirtyState,
+      dirtyReasons: result.debug.dirtyReasonKey,
+      dirtyReasonBits: result.debug.dirtyReasonBits,
+      dirtyRows: result.debug.dirtyRows,
+      selectionRows: result.debug.selectionRows,
+      hyperlinkRows: result.debug.hyperlinkRows,
+      viewportY: result.debug.viewportY,
+      scrollbackLength: result.debug.scrollbackLength,
       forceAll,
     });
 
-    return input;
+    return result.frame;
   }
 
   private renderFrame(

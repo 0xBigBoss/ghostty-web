@@ -3,6 +3,15 @@
  * Based on include/ghostty/vt/*.h from Ghostty repository
  */
 
+import {
+  CellFlags,
+  DirtyState,
+  type GhosttyCell,
+} from "./renderer-contract";
+
+export { CellFlags, DirtyState };
+export type { GhosttyCell };
+
 // ============================================================================
 // SGR (Select Graphic Rendition) Types
 // ============================================================================
@@ -472,15 +481,6 @@ export interface GhosttyWasmExports extends WebAssembly.Exports {
 // ============================================================================
 
 /**
- * Dirty state from RenderState
- */
-export enum DirtyState {
-  NONE = 0,
-  PARTIAL = 1,
-  FULL = 2,
-}
-
-/**
  * Cursor state from RenderState (8 bytes packed)
  * Layout: x(u16) + y(u16) + viewport_x(i16) + viewport_y(i16) + visible(bool) + blinking(bool) + style(u8) + _pad(u8)
  */
@@ -538,43 +538,12 @@ export const GHOSTTY_CONFIG_SIZE = 80;
 export type TerminalHandle = number;
 
 /**
- * Cell structure matching ghostty_cell_t in C (16 bytes)
- */
-export interface GhosttyCell {
-  codepoint: number; // u32 (Unicode codepoint - first codepoint of grapheme)
-  fg_r: number; // u8 (foreground red)
-  fg_g: number; // u8 (foreground green)
-  fg_b: number; // u8 (foreground blue)
-  bg_r: number; // u8 (background red)
-  bg_g: number; // u8 (background green)
-  bg_b: number; // u8 (background blue)
-  flags: number; // u8 (style flags bitfield)
-  width: number; // u8 (character width: 1=normal, 2=wide, etc.)
-  hyperlink_id: number; // u16 (0 = no link, >0 = hyperlink ID in set)
-  grapheme_len: number; // u8 (number of extra codepoints beyond first)
-}
-
-/**
  * RGB color
  */
 export interface RGB {
   r: number;
   g: number;
   b: number;
-}
-
-/**
- * Cell style flags (bitfield)
- */
-export enum CellFlags {
-  BOLD = 1 << 0,
-  ITALIC = 1 << 1,
-  UNDERLINE = 1 << 2,
-  STRIKETHROUGH = 1 << 3,
-  INVERSE = 1 << 4,
-  INVISIBLE = 1 << 5,
-  BLINK = 1 << 6,
-  FAINT = 1 << 7,
 }
 
 /**

@@ -115,6 +115,10 @@ export class SelectionManager {
     this.attachEventListeners();
   }
 
+  setRenderer(renderer: Renderer): void {
+    this.renderer = renderer;
+  }
+
   // ==========================================================================
   // Public API
   // ==========================================================================

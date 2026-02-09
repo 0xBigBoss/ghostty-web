@@ -82,6 +82,7 @@ export type {
   Cursor,
   TerminalHandle,
 } from "./types";
+export { DirtyState, ROW_DIRTY, ROW_HAS_HYPERLINK, ROW_HAS_SELECTION } from "./renderer-contract";
 
 // Low-level components (for custom integrations)
 export { CanvasRenderer } from "./renderer";
@@ -89,13 +90,16 @@ export type { RendererOptions, FontMetrics } from "./renderer";
 export type {
   CellMetrics,
   CursorStyle,
+  GraphemeRow,
+  GraphemeRows,
   HyperlinkRange,
   LinkRange,
+  RGBA,
   RenderInput,
   Renderer,
   SelectionRange,
   TerminalTheme,
-} from "./renderer-types";
+} from "./renderer-contract";
 export { InputHandler } from "./input-handler";
 export { EventEmitter } from "./event-emitter";
 export { SelectionManager } from "./selection-manager";

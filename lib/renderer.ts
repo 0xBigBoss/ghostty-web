@@ -14,6 +14,7 @@ import type { ITheme } from "./interfaces";
 import type {
   CellMetrics,
   CursorStyle,
+  GraphemeRows,
   HyperlinkRange,
   RenderInput,
   Renderer,
@@ -24,6 +25,11 @@ import { ROW_DIRTY, ROW_HAS_HYPERLINK, ROW_HAS_SELECTION } from "./renderer-type
 import { CellFlags, DirtyState, type GhosttyCell } from "./types";
 import { profileDuration, profileStart } from "./profile";
 import { DEFAULT_THEME, rgbaToCss, resolveTheme } from "./theme";
+
+function shouldLogRendererDiagnostics(): boolean {
+  if (typeof window === "undefined") return false;
+  return (window as Window & { GHOSTTY_DEBUG_WRITES?: boolean }).GHOSTTY_DEBUG_WRITES === true;
+}
 
 // ============================================================================
 // Type Definitions
@@ -60,6 +66,7 @@ export class CanvasRenderer implements Renderer {
   private metrics: CellMetrics;
   private currentSelectionRange: SelectionRange | null = null;
   private currentHoveredLink: HyperlinkRange | null = null;
+  private currentGraphemeRows: GraphemeRows = [];
   private currentGetGraphemeString?: (viewportRow: number, col: number) => string;
 
   constructor(
@@ -208,6 +215,7 @@ export class CanvasRenderer implements Renderer {
     this.theme = input.theme;
     this.currentSelectionRange = input.selectionRange;
     this.currentHoveredLink = input.hoveredLink;
+    this.currentGraphemeRows = input.graphemeRows;
     this.currentGetGraphemeString = input.getGraphemeString;
 
     const cols = input.cols;
@@ -236,7 +244,7 @@ export class CanvasRenderer implements Renderer {
 
     // Diagnostic: dump first 3 lines of viewport cells received by renderer
     // This is enabled when dirtyState is FULL (which happens on backspace writes)
-    if (forceAll && input.viewportCells.length > 0) {
+    if (forceAll && input.viewportCells.length > 0 && shouldLogRendererDiagnostics()) {
       for (let row = 0; row < Math.min(3, rows); row++) {
         let text = "";
         for (let col = 0; col < cols; col++) {
@@ -437,8 +445,15 @@ export class CanvasRenderer implements Renderer {
 
     // Get the character to render - use grapheme lookup for complex scripts
     let char: string;
-    if (cell.grapheme_len > 0 && this.currentGetGraphemeString) {
-      char = this.currentGetGraphemeString(y, x);
+    if (cell.grapheme_len > 0) {
+      const preResolved = this.currentGraphemeRows[y]?.[x];
+      if (preResolved !== undefined) {
+        char = preResolved;
+      } else if (this.currentGetGraphemeString) {
+        char = this.currentGetGraphemeString(y, x);
+      } else {
+        char = String.fromCodePoint(cell.codepoint || 32);
+      }
     } else {
       // Simple cell - single codepoint
       char = String.fromCodePoint(cell.codepoint || 32); // Default to space if null
